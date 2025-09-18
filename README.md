@@ -24,6 +24,26 @@ Very useful tool that is able to extract almost same amount of data as the offic
 -   Result can be saved to the JSON/CSV files
 -   You can scrape up to **500 products** and **1000 reviews**
 
+## Desktop Application (Go/Fyne)
+
+This fork adds a cross-platform desktop experience named **Amazon Product Intelligence Suite**. The application is written in Go using the Fyne toolkit and bundles multiple research workflows:
+
+- Beautiful multi-tab user interface for product lookups, keyword research, competitive analysis, and international market discovery.
+- Backend service with request throttling, timeout management, and heuristic scoring to keep Amazon scraping reliable.
+- Publisher Rocket-inspired extras such as reverse ASIN lookups, AMS keyword generation, bestseller snapshots, and compliance flagging.
+
+### Quick start
+
+```bash
+# run the UI locally
+go run ./cmd/app
+
+# build a Windows executable
+GOOS=windows GOARCH=amd64 go build -o amazon-product-scraper.exe ./cmd/app
+```
+
+More detailed packaging instructions (including the Inno Setup installer) are available in [`docs/BUILD_WINDOWS.md`](docs/BUILD_WINDOWS.md).
+
 **Product List**
 ![alt text](https://i.imgur.com/ES5M4Rx.png)
 **Review List**
