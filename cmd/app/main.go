@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -70,11 +71,29 @@ func buildProductLookupTab(service *scraper.Service, countries []string, output 
 	resultView.SetMinRowsVisible(12)
 	resultView.Disable()
 
+	fetchInFlight := false
+	var updateButton func()
 	fetchButton := widget.NewButton("Fetch Product", func() {
-		asin := strings.TrimSpace(asinEntry.Text)
+		asin := strings.ToUpper(strings.TrimSpace(asinEntry.Text))
+		if asin != asinEntry.Text {
+			asinEntry.SetText(asin)
+		}
+		if !isValidASIN(asin) {
+			output.Set("Enter a valid 10-character ASIN to fetch product details.")
+			return
+		}
+
 		country := countrySelect.Selected
+		fetchInFlight = true
+		fetchButton.Disable()
+		output.Set(fmt.Sprintf("Fetching product %s from %s...", asin, country))
+
 		go func() {
-			output.Set(fmt.Sprintf("Fetching product %s from %s...", asin, country))
+			defer fyne.CurrentApp().Driver().RunOnMain(func() {
+				fetchInFlight = false
+				updateButton()
+			})
+
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 			product, err := service.FetchProduct(ctx, asin, country)
@@ -85,6 +104,13 @@ func buildProductLookupTab(service *scraper.Service, countries []string, output 
 			output.Set(formatProductDetails(product))
 		}()
 	})
+	fetchButton.Disable()
+
+	updateButton = func() {
+		updateProductButtonState(asinEntry, fetchButton, fetchInFlight)
+	}
+	attachTrimHandler(asinEntry, updateButton)
+	updateButton()
 
 	form := container.New(layout.NewFormLayout(),
 		widget.NewLabelWithStyle("ASIN", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), asinEntry,
@@ -120,11 +146,31 @@ func buildKeywordResearchTab(service *scraper.Service, countries []string, keywo
 	bestsellerView.Bind(bestsellerOutput)
 	bestsellerView.Disable()
 
+	researchInFlight := false
+	var updateResearch func()
 	fetchButton := widget.NewButton("Run Research", func() {
 		keyword := strings.TrimSpace(keywordEntry.Text)
+		if keyword != keywordEntry.Text {
+			keywordEntry.SetText(keyword)
+		}
+		if keyword == "" {
+			keywordOutput.Set("Enter a keyword to run research.")
+			categoryOutput.Set("Enter a keyword to run research.")
+			bestsellerOutput.Set("Enter a keyword to run research.")
+			return
+		}
+
 		country := countrySelect.Selected
+		researchInFlight = true
+		fetchButton.Disable()
+		keywordOutput.Set(fmt.Sprintf("Fetching keyword suggestions for %s...", keyword))
+
 		go func() {
-			keywordOutput.Set(fmt.Sprintf("Fetching keyword suggestions for %s...", keyword))
+			defer fyne.CurrentApp().Driver().RunOnMain(func() {
+				researchInFlight = false
+				updateResearch()
+			})
+
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 
@@ -150,6 +196,13 @@ func buildKeywordResearchTab(service *scraper.Service, countries []string, keywo
 			}
 		}()
 	})
+	fetchButton.Disable()
+
+	updateResearch = func() {
+		updateResearchButtonState(keywordEntry, fetchButton, researchInFlight)
+	}
+	attachTrimHandler(keywordEntry, updateResearch)
+	updateResearch()
 
 	grid := container.NewGridWithRows(3,
 		container.NewBorder(widget.NewLabelWithStyle("Keyword Suggestions", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), nil, nil, nil, keywordView),
@@ -191,11 +244,29 @@ func buildCompetitiveTab(service *scraper.Service, countries []string, reverseOu
 	campaignView.Bind(campaignOutput)
 	campaignView.Disable()
 
+	reverseInFlight := false
+	var updateReverse func()
 	reverseButton := widget.NewButton("Reverse ASIN Search", func() {
-		asin := strings.TrimSpace(reverseAsinEntry.Text)
+		asin := strings.ToUpper(strings.TrimSpace(reverseAsinEntry.Text))
+		if asin != reverseAsinEntry.Text {
+			reverseAsinEntry.SetText(asin)
+		}
+		if !isValidASIN(asin) {
+			reverseOutput.Set("Enter a valid ASIN to run a reverse search.")
+			return
+		}
+
 		country := countrySelect.Selected
+		reverseInFlight = true
+		reverseButton.Disable()
+		reverseOutput.Set(fmt.Sprintf("Running reverse ASIN search for %s...", asin))
+
 		go func() {
-			reverseOutput.Set(fmt.Sprintf("Running reverse ASIN search for %s...", asin))
+			defer fyne.CurrentApp().Driver().RunOnMain(func() {
+				reverseInFlight = false
+				updateReverse()
+			})
+
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 			insights, err := service.ReverseASINSearch(ctx, asin, country)
@@ -206,15 +277,36 @@ func buildCompetitiveTab(service *scraper.Service, countries []string, reverseOu
 			reverseOutput.Set(formatKeywordInsights(fmt.Sprintf("ASIN %s", asin), insights))
 		}()
 	})
+	reverseButton.Disable()
 
+	campaignInFlight := false
+	var updateCampaign func()
 	campaignButton := widget.NewButton("Generate AMS Keywords", func() {
+		title := strings.TrimSpace(titleEntry.Text)
+		if title != titleEntry.Text {
+			titleEntry.SetText(title)
+		}
+		description := strings.TrimSpace(descriptionEntry.Text)
+		if description == "" {
+			campaignOutput.Set("Provide a title and description to generate AMS keywords.")
+			return
+		}
+
 		country := countrySelect.Selected
-		competitors := strings.Split(strings.ReplaceAll(competitorKeywordsEntry.Text, "\r", ""), "\n")
+		competitors := cleanCompetitorKeywords(competitorKeywordsEntry.Text)
+		campaignInFlight = true
+		campaignButton.Disable()
+		campaignOutput.Set("Generating keyword list...")
+
 		go func() {
-			campaignOutput.Set("Generating keyword list...")
+			defer fyne.CurrentApp().Driver().RunOnMain(func() {
+				campaignInFlight = false
+				updateCampaign()
+			})
+
 			ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 			defer cancel()
-			keywords, err := service.GenerateAMSKeywords(ctx, titleEntry.Text, descriptionEntry.Text, competitors, country)
+			keywords, err := service.GenerateAMSKeywords(ctx, title, description, competitors, country)
 			if err != nil {
 				campaignOutput.Set(fmt.Sprintf("Error: %v", err))
 				return
@@ -223,6 +315,26 @@ func buildCompetitiveTab(service *scraper.Service, countries []string, reverseOu
 			campaignOutput.Set(formatCampaignKeywords(keywords, flagged))
 		}()
 	})
+	campaignButton.Disable()
+
+	updateReverse = func() {
+		updateReverseButtonState(reverseAsinEntry, reverseButton, reverseInFlight)
+	}
+	attachTrimHandler(reverseAsinEntry, updateReverse)
+	updateReverse()
+
+	updateCampaign = func() {
+		updateCampaignButtonState(titleEntry, descriptionEntry, campaignButton, campaignInFlight)
+	}
+	descriptionEntry.OnChanged = func(string) {
+		updateCampaign()
+	}
+	competitorKeywordsEntry.OnChanged = func(string) {
+		// no-op for trimming, but ensure button state reacts to edits if description cleared
+		updateCampaign()
+	}
+	attachTrimHandler(titleEntry, updateCampaign)
+	updateCampaign()
 
 	buttonRow := container.NewHBox(reverseButton, campaignButton)
 
@@ -261,14 +373,33 @@ func buildInternationalTab(service *scraper.Service, countries []string, output 
 	outputView.Bind(output)
 	outputView.Disable()
 
+	internationalInFlight := false
+	var updateInternational func()
 	fetchButton := widget.NewButton("Collect International Keywords", func() {
+		keyword := strings.TrimSpace(keywordEntry.Text)
+		if keyword != keywordEntry.Text {
+			keywordEntry.SetText(keyword)
+		}
+		if keyword == "" {
+			output.Set("Enter a keyword to collect international keyword data.")
+			return
+		}
+
 		selected := countrySelect.Selected
 		if len(selected) == 0 {
 			selected = countries
 		}
-		keyword := keywordEntry.Text
+
+		internationalInFlight = true
+		fetchButton.Disable()
+		output.Set("Collecting international keyword data...")
+
 		go func() {
-			output.Set("Collecting international keyword data...")
+			defer fyne.CurrentApp().Driver().RunOnMain(func() {
+				internationalInFlight = false
+				updateInternational()
+			})
+
 			ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
 			defer cancel()
 			keywords, err := service.InternationalKeywords(ctx, keyword, selected)
@@ -279,6 +410,13 @@ func buildInternationalTab(service *scraper.Service, countries []string, output 
 			output.Set(formatInternationalKeywords(keywords))
 		}()
 	})
+	fetchButton.Disable()
+
+	updateInternational = func() {
+		updateInternationalButtonState(keywordEntry, fetchButton, internationalInFlight)
+	}
+	attachTrimHandler(keywordEntry, updateInternational)
+	updateInternational()
 
 	form := container.NewVBox(
 		widget.NewForm(
@@ -289,6 +427,150 @@ func buildInternationalTab(service *scraper.Service, countries []string, output 
 	)
 
 	return container.NewBorder(form, fetchButton, nil, nil, outputView)
+}
+
+func attachTrimHandler(entry *widget.Entry, update func()) {
+	entry.OnChanged = func(s string) {
+		trimmed := strings.TrimSpace(s)
+		if !entry.MultiLine && trimmed != s {
+			entry.SetText(trimmed)
+			return
+		}
+		if update != nil {
+			update()
+		}
+	}
+	entry.OnSubmitted = func(s string) {
+		trimmed := strings.TrimSpace(s)
+		if trimmed != s {
+			entry.SetText(trimmed)
+			return
+		}
+		if update != nil {
+			update()
+		}
+	}
+}
+
+func updateProductButtonState(entry *widget.Entry, button *widget.Button, inFlight bool) {
+	if inFlight {
+		button.Disable()
+		return
+	}
+
+	asin := strings.ToUpper(strings.TrimSpace(entry.Text))
+	if asin != entry.Text {
+		entry.SetText(asin)
+		return
+	}
+
+	if isValidASIN(asin) {
+		button.Enable()
+	} else {
+		button.Disable()
+	}
+}
+
+func updateResearchButtonState(entry *widget.Entry, button *widget.Button, inFlight bool) {
+	if inFlight {
+		button.Disable()
+		return
+	}
+
+	keyword := strings.TrimSpace(entry.Text)
+	if keyword != entry.Text {
+		entry.SetText(keyword)
+		return
+	}
+
+	if keyword == "" {
+		button.Disable()
+		return
+	}
+	button.Enable()
+}
+
+func updateReverseButtonState(entry *widget.Entry, button *widget.Button, inFlight bool) {
+	if inFlight {
+		button.Disable()
+		return
+	}
+
+	asin := strings.ToUpper(strings.TrimSpace(entry.Text))
+	if asin != entry.Text {
+		entry.SetText(asin)
+		return
+	}
+
+	if isValidASIN(asin) {
+		button.Enable()
+	} else {
+		button.Disable()
+	}
+}
+
+func updateCampaignButtonState(titleEntry, descriptionEntry *widget.Entry, button *widget.Button, inFlight bool) {
+	if inFlight {
+		button.Disable()
+		return
+	}
+
+	title := strings.TrimSpace(titleEntry.Text)
+	if title != titleEntry.Text {
+		titleEntry.SetText(title)
+		return
+	}
+
+	description := strings.TrimSpace(descriptionEntry.Text)
+	if title == "" || description == "" {
+		button.Disable()
+		return
+	}
+
+	button.Enable()
+}
+
+func updateInternationalButtonState(entry *widget.Entry, button *widget.Button, inFlight bool) {
+	if inFlight {
+		button.Disable()
+		return
+	}
+
+	keyword := strings.TrimSpace(entry.Text)
+	if keyword != entry.Text {
+		entry.SetText(keyword)
+		return
+	}
+
+	if keyword == "" {
+		button.Disable()
+		return
+	}
+
+	button.Enable()
+}
+
+func cleanCompetitorKeywords(raw string) []string {
+	sanitized := strings.ReplaceAll(raw, "\r", "")
+	parts := strings.Split(sanitized, "\n")
+	results := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			results = append(results, trimmed)
+		}
+	}
+	return results
+}
+
+var asinPattern = regexp.MustCompile(`^[A-Z0-9]{10}$`)
+
+func isValidASIN(value string) bool {
+	if value == "" {
+		return false
+	}
+	upper := strings.ToUpper(value)
+	return asinPattern.MatchString(upper)
 }
 
 func formatProductDetails(product *scraper.ProductDetails) string {
