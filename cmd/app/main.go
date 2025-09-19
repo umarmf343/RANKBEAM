@@ -14,7 +14,9 @@ import (
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/data/binding"
+	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/layout"
+	"fyne.io/fyne/v2/storage"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
@@ -51,17 +53,17 @@ func main() {
 	internationalBinding.Set("International keyword suggestions will appear here.")
 
 	tabs := container.NewAppTabs(
-		container.NewTabItem("Product Lookup", buildProductLookupTab(service, countries, productBinding)),
-		container.NewTabItem("Keyword Research", buildKeywordResearchTab(service, countries, keywordBinding, categoryBinding, bestsellerBinding)),
-		container.NewTabItem("Competitive Analysis", buildCompetitiveTab(service, countries, reverseBinding, campaignBinding)),
-		container.NewTabItem("International", buildInternationalTab(service, countries, internationalBinding)),
+		container.NewTabItem("Product Lookup", buildProductLookupTab(window, service, countries, productBinding)),
+		container.NewTabItem("Keyword Research", buildKeywordResearchTab(window, service, countries, keywordBinding, categoryBinding, bestsellerBinding)),
+		container.NewTabItem("Competitive Analysis", buildCompetitiveTab(window, service, countries, reverseBinding, campaignBinding)),
+		container.NewTabItem("International", buildInternationalTab(window, service, countries, internationalBinding)),
 	)
 
 	window.SetContent(tabs)
 	window.ShowAndRun()
 }
 
-func buildProductLookupTab(service *scraper.Service, countries []string, output binding.String) fyne.CanvasObject {
+func buildProductLookupTab(win fyne.Window, service *scraper.Service, countries []string, output binding.String) fyne.CanvasObject {
 	asinEntry := widget.NewEntry()
 	asinEntry.SetPlaceHolder("B09XYZ1234")
 
@@ -95,14 +97,16 @@ func buildProductLookupTab(service *scraper.Service, countries []string, output 
 		widget.NewLabelWithStyle("Country", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), countrySelect,
 	)
 
-	content := container.NewBorder(nil, fetchButton, nil, nil,
-		container.NewVBox(form, widget.NewSeparator(), resultView),
+	results := newResultPanel("Product Details", resultView, output, nil, win, "")
+
+	content := container.NewBorder(form, container.NewHBox(layout.NewSpacer(), fetchButton), nil, nil,
+		container.NewVBox(widget.NewSeparator(), results),
 	)
 
 	return container.NewPadded(content)
 }
 
-func buildKeywordResearchTab(service *scraper.Service, countries []string, keywordOutput, categoryOutput, bestsellerOutput binding.String) fyne.CanvasObject {
+func buildKeywordResearchTab(win fyne.Window, service *scraper.Service, countries []string, keywordOutput, categoryOutput, bestsellerOutput binding.String) fyne.CanvasObject {
 	keywordEntry := widget.NewEntry()
 	keywordEntry.SetPlaceHolder("Enter a seed keyword e.g. self publishing")
 
@@ -120,12 +124,19 @@ func buildKeywordResearchTab(service *scraper.Service, countries []string, keywo
 	categoryView.Disable()
 
 	bestsellerView := widget.NewMultiLineEntry()
+	keywordCSV := binding.NewString()
+	categoryCSV := binding.NewString()
+	bestsellerCSV := binding.NewString()
 	bestsellerView.Wrapping = fyne.TextWrapWord
 	bestsellerView.Bind(bestsellerOutput)
 	bestsellerView.Disable()
 
-	metricControls, metricPanel := newMetricFilterControls()
-	bestsellerControls, bestsellerPanel := newBestsellerFilterControls()
+	keywordCSV.Set("")
+	categoryCSV.Set("")
+	bestsellerCSV.Set("")
+
+	metricControls, metricFilterPanel := newMetricFilterControls()
+	bestsellerControls, bestsellerFilterPanel := newBestsellerFilterControls()
 
 	fetchButton := widget.NewButton("Run Research", func() {
 		keyword := strings.TrimSpace(keywordEntry.Text)
@@ -142,33 +153,43 @@ func buildKeywordResearchTab(service *scraper.Service, countries []string, keywo
 			suggestions, err := service.KeywordSuggestions(ctx, keyword, country, filters)
 			if err != nil {
 				keywordOutput.Set(renderScrapeError(err))
+				keywordCSV.Set("")
 			} else {
-				formatted, _ := formatKeywordInsights(keyword, suggestions, showDensity)
+				formatted, csvData := formatKeywordInsights(keyword, suggestions, showDensity)
 				keywordOutput.Set(formatted)
+				keywordCSV.Set(csvData)
 			}
 
 			categories, err := service.CategorySuggestions(ctx, keyword, country)
 			if err != nil {
 				categoryOutput.Set(renderScrapeError(err))
+				categoryCSV.Set("")
 			} else {
-				formatted, _ := formatCategoryTrends(categories)
+				formatted, csvData := formatCategoryTrends(categories)
 				categoryOutput.Set(formatted)
+				categoryCSV.Set(csvData)
 			}
 
 			bestsellers, err := service.BestsellerAnalysis(ctx, keyword, country, bestsellerFilter)
 			if err != nil {
 				bestsellerOutput.Set(renderScrapeError(err))
+				bestsellerCSV.Set("")
 			} else {
-				formatted, _ := formatBestsellerProducts(bestsellers, showBSR)
+				formatted, csvData := formatBestsellerProducts(bestsellers, showBSR)
 				bestsellerOutput.Set(formatted)
+				bestsellerCSV.Set(csvData)
 			}
 		}()
 	})
 
+	keywordResults := newResultPanel("Keyword Suggestions", keywordView, keywordOutput, keywordCSV, win, "keyword-suggestions.csv")
+	categoryResults := newResultPanel("Category Opportunities", categoryView, categoryOutput, categoryCSV, win, "category-opportunities.csv")
+	bestsellerResults := newResultPanel("Bestseller Snapshot", bestsellerView, bestsellerOutput, bestsellerCSV, win, "bestseller-snapshot.csv")
+
 	grid := container.NewGridWithRows(3,
-		container.NewBorder(widget.NewLabelWithStyle("Keyword Suggestions", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), nil, nil, nil, keywordView),
-		container.NewBorder(widget.NewLabelWithStyle("Category Opportunities", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), nil, nil, nil, categoryView),
-		container.NewBorder(widget.NewLabelWithStyle("Bestseller Snapshot", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), nil, nil, nil, bestsellerView),
+		keywordResults,
+		categoryResults,
+		bestsellerResults,
 	)
 
 	form := container.New(layout.NewFormLayout(),
@@ -179,15 +200,15 @@ func buildKeywordResearchTab(service *scraper.Service, countries []string, keywo
 	controls := container.NewVBox(
 		form,
 		widget.NewSeparator(),
-		metricPanel,
+		metricFilterPanel,
 		widget.NewSeparator(),
-		bestsellerPanel,
+		bestsellerFilterPanel,
 	)
 
 	return container.NewBorder(controls, fetchButton, nil, nil, grid)
 }
 
-func buildCompetitiveTab(service *scraper.Service, countries []string, reverseOutput, campaignOutput binding.String) fyne.CanvasObject {
+func buildCompetitiveTab(win fyne.Window, service *scraper.Service, countries []string, reverseOutput, campaignOutput binding.String) fyne.CanvasObject {
 	reverseAsinEntry := widget.NewEntry()
 	reverseAsinEntry.SetPlaceHolder("Competitor ASIN")
 
@@ -209,6 +230,10 @@ func buildCompetitiveTab(service *scraper.Service, countries []string, reverseOu
 	reverseView.Disable()
 
 	campaignView := widget.NewMultiLineEntry()
+	reverseCSV := binding.NewString()
+	campaignCSV := binding.NewString()
+	reverseCSV.Set("")
+	campaignCSV.Set("")
 	campaignView.Wrapping = fyne.TextWrapWord
 	campaignView.Bind(campaignOutput)
 	campaignView.Disable()
@@ -227,10 +252,12 @@ func buildCompetitiveTab(service *scraper.Service, countries []string, reverseOu
 			insights, err := service.ReverseASINSearch(ctx, asin, country, filters)
 			if err != nil {
 				reverseOutput.Set(renderScrapeError(err))
+				reverseCSV.Set("")
 				return
 			}
-			formatted, _ := formatKeywordInsights(fmt.Sprintf("ASIN %s", asin), insights, showDensity)
+			formatted, csvData := formatKeywordInsights(fmt.Sprintf("ASIN %s", asin), insights, showDensity)
 			reverseOutput.Set(formatted)
+			reverseCSV.Set(csvData)
 		}()
 	})
 
@@ -244,11 +271,13 @@ func buildCompetitiveTab(service *scraper.Service, countries []string, reverseOu
 			keywords, err := service.GenerateAMSKeywords(ctx, titleEntry.Text, descriptionEntry.Text, competitors, country)
 			if err != nil {
 				campaignOutput.Set(renderScrapeError(err))
+				campaignCSV.Set("")
 				return
 			}
 			flagged := scraper.FlagIllegalKeywords(keywords)
-			formatted, _ := formatCampaignKeywords(keywords, flagged)
+			formatted, csvData := formatCampaignKeywords(keywords, flagged)
 			campaignOutput.Set(formatted)
+			campaignCSV.Set(csvData)
 		}()
 	})
 
@@ -270,16 +299,19 @@ func buildCompetitiveTab(service *scraper.Service, countries []string, reverseOu
 		),
 	)
 
+	reverseResults := newResultPanel("Reverse ASIN Insights", reverseView, reverseOutput, reverseCSV, win, "reverse-asin.csv")
+	campaignResults := newResultPanel("Keyword Portfolio", campaignView, campaignOutput, campaignCSV, win, "ams-keywords.csv")
+
 	results := container.NewHSplit(
-		container.NewBorder(widget.NewLabelWithStyle("Reverse ASIN Insights", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), nil, nil, nil, reverseView),
-		container.NewBorder(widget.NewLabelWithStyle("Keyword Portfolio", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), nil, nil, nil, campaignView),
+		reverseResults,
+		campaignResults,
 	)
 	results.SetOffset(0.5)
 
 	return container.NewBorder(form, buttonRow, nil, nil, results)
 }
 
-func buildInternationalTab(service *scraper.Service, countries []string, output binding.String) fyne.CanvasObject {
+func buildInternationalTab(win fyne.Window, service *scraper.Service, countries []string, output binding.String) fyne.CanvasObject {
 	keywordEntry := widget.NewEntry()
 	keywordEntry.SetPlaceHolder("Seed keyword e.g. coloring book")
 
@@ -290,6 +322,9 @@ func buildInternationalTab(service *scraper.Service, countries []string, output 
 	outputView.Wrapping = fyne.TextWrapWord
 	outputView.Bind(output)
 	outputView.Disable()
+
+	csvBinding := binding.NewString()
+	csvBinding.Set("")
 
 	fetchButton := widget.NewButton("Collect International Keywords", func() {
 		selected := countrySelect.Selected
@@ -304,10 +339,12 @@ func buildInternationalTab(service *scraper.Service, countries []string, output 
 			keywords, err := service.InternationalKeywords(ctx, keyword, selected)
 			if err != nil {
 				output.Set(renderScrapeError(err))
+				csvBinding.Set("")
 				return
 			}
-			formatted, _ := formatInternationalKeywords(keywords)
+			formatted, csvData := formatInternationalKeywords(keywords)
 			output.Set(formatted)
+			csvBinding.Set(csvData)
 		}()
 	})
 
@@ -319,7 +356,66 @@ func buildInternationalTab(service *scraper.Service, countries []string, output 
 		countrySelect,
 	)
 
-	return container.NewBorder(form, fetchButton, nil, nil, outputView)
+	results := newResultPanel("International Keyword Radar", outputView, output, csvBinding, win, "international-keywords.csv")
+
+	return container.NewBorder(form, container.NewHBox(layout.NewSpacer(), fetchButton), nil, nil, container.NewVBox(widget.NewSeparator(), results))
+}
+
+func newResultPanel(title string, view *widget.Entry, textData binding.String, csvData binding.String, win fyne.Window, fileName string) fyne.CanvasObject {
+	label := widget.NewLabelWithStyle(title, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+	actions := []fyne.CanvasObject{layout.NewSpacer(), newCopyButton(win, textData)}
+	if csvData != nil {
+		actions = append(actions, newExportCSVButton(win, csvData, fileName))
+	}
+
+	return container.NewBorder(label, container.NewHBox(actions...), nil, nil, view)
+}
+
+func newCopyButton(win fyne.Window, data binding.String) *widget.Button {
+	return widget.NewButtonWithIcon("Copy", theme.ContentCopyIcon(), func() {
+		if win == nil || data == nil {
+			return
+		}
+		value, err := data.Get()
+		if err != nil || strings.TrimSpace(value) == "" {
+			dialog.ShowInformation("Nothing to copy", "Run a search to generate results before copying.", win)
+			return
+		}
+		win.Clipboard().SetContent(value)
+	})
+}
+
+func newExportCSVButton(win fyne.Window, data binding.String, fileName string) *widget.Button {
+	return widget.NewButtonWithIcon("Export CSV", theme.DocumentSaveIcon(), func() {
+		if win == nil || data == nil {
+			return
+		}
+		csvValue, err := data.Get()
+		if err != nil || strings.TrimSpace(csvValue) == "" {
+			dialog.ShowInformation("Nothing to export", "There is no CSV data available yet. Run a search first.", win)
+			return
+		}
+		name := strings.TrimSpace(fileName)
+		if name == "" {
+			name = "results.csv"
+		}
+		save := dialog.NewFileSave(func(writer fyne.URIWriteCloser, err error) {
+			if err != nil {
+				dialog.ShowError(err, win)
+				return
+			}
+			if writer == nil {
+				return
+			}
+			defer writer.Close()
+			if _, err := writer.Write([]byte(csvValue)); err != nil {
+				dialog.ShowError(err, win)
+			}
+		}, win)
+		save.SetFileName(name)
+		save.SetFilter(storage.NewExtensionFileFilter([]string{".csv"}))
+		save.Show()
+	})
 }
 
 func renderScrapeError(err error) string {
