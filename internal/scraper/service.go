@@ -228,7 +228,7 @@ func (s *Service) KeywordSuggestions(ctx context.Context, keyword, country strin
 	params.Set("page-type", "Search")
 	params.Set("client-info", "amazon-search-ui")
 	params.Set("limit", "15")
-	params.Set("mid", cfg.MarketplaceID)
+	params.Set("mid", cfg.MarketID)
 	params.Set("alias", "aps")
 	params.Set("suggestion-type", "KEYWORD")
 	params.Set("prefix", keyword)
