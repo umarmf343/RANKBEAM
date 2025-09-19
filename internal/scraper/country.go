@@ -1,5 +1,7 @@
 package scraper
 
+import "strings"
+
 // CountryConfig represents marketplace configuration for supported Amazon regions.
 type CountryConfig struct {
 	Country       string
@@ -42,7 +44,8 @@ func Countries() []string {
 // ConfigFor returns the marketplace configuration for the provided ISO Alpha-2 code.
 // When the country is unknown the function falls back to the United States marketplace.
 func ConfigFor(country string) CountryConfig {
-	if cfg, ok := countryConfigs[country]; ok {
+	normalized := strings.ToUpper(strings.TrimSpace(country))
+	if cfg, ok := countryConfigs[normalized]; ok {
 		return cfg
 	}
 	return countryConfigs["US"]

@@ -558,10 +558,40 @@ func (s *Service) GenerateAMSKeywords(ctx context.Context, title, description st
 		return nil, errors.New("provide title, description or competitor keywords")
 	}
 
+	stopWords := map[string]struct{}{
+		"the":  {},
+		"and":  {},
+		"for":  {},
+		"you":  {},
+		"your": {},
+		"with": {},
+		"from": {},
+		"that": {},
+		"this": {},
+		"have": {},
+		"has":  {},
+		"are":  {},
+		"but":  {},
+		"not":  {},
+		"all":  {},
+		"any":  {},
+		"can":  {},
+		"our":  {},
+		"out":  {},
+		"one":  {},
+		"two":  {},
+	}
+
 	bag := map[string]int{}
 	add := func(token string, weight int) {
 		token = strings.ToLower(strings.TrimSpace(token))
 		if token == "" {
+			return
+		}
+		if len([]rune(token)) < 3 {
+			return
+		}
+		if _, skip := stopWords[token]; skip {
 			return
 		}
 		bag[token] += weight
