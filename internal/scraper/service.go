@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
@@ -18,10 +19,15 @@ import (
 
 // Service encapsulates HTTP access and scraping helpers used by the application.
 type Service struct {
-	client      *http.Client
-	rateLimiter <-chan time.Time
-	userAgents  []string
+	client     *http.Client
+	ticker     *time.Ticker
+	closed     chan struct{}
+	closeOnce  sync.Once
+	userAgents []string
 }
+
+// ErrServiceClosed indicates the scraper service has been closed.
+var ErrServiceClosed = errors.New("scraper service closed")
 
 // NewService creates a scraper service with sane defaults such as timeout handling,
 // rate limiting and a pool of realistic user agents.
@@ -30,15 +36,35 @@ func NewService(timeout time.Duration, requestsPerMinute int) *Service {
 		requestsPerMinute = 20
 	}
 	interval := time.Minute / time.Duration(requestsPerMinute)
+	ticker := time.NewTicker(interval)
 	return &Service{
-		client:      &http.Client{Timeout: timeout},
-		rateLimiter: time.Tick(interval),
+		client: &http.Client{Timeout: timeout},
+		ticker: ticker,
+		closed: make(chan struct{}),
 		userAgents: []string{
 			"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
 			"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.3 Safari/605.1.15",
 			"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
 		},
 	}
+}
+
+// Rate exposes the underlying rate limiter channel for callers needing access to raw ticks.
+func (s *Service) Rate() <-chan time.Time {
+	if s.ticker == nil {
+		return nil
+	}
+	return s.ticker.C
+}
+
+// Close stops the service ticker and unblocks any pending waiters.
+func (s *Service) Close() {
+	s.closeOnce.Do(func() {
+		if s.ticker != nil {
+			s.ticker.Stop()
+		}
+		close(s.closed)
+	})
 }
 
 // FetchProduct retrieves product information by ASIN for the requested country marketplace.
@@ -61,7 +87,9 @@ func (s *Service) FetchProduct(ctx context.Context, asin, country string) (*Prod
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	case <-s.rateLimiter:
+	case <-s.closed:
+		return nil, ErrServiceClosed
+	case <-s.ticker.C:
 	}
 
 	resp, err := s.client.Do(req)
@@ -152,7 +180,9 @@ func (s *Service) KeywordSuggestions(ctx context.Context, keyword, country strin
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	case <-s.rateLimiter:
+	case <-s.closed:
+		return nil, ErrServiceClosed
+	case <-s.ticker.C:
 	}
 
 	resp, err := s.client.Do(req)
@@ -219,7 +249,9 @@ func (s *Service) CategorySuggestions(ctx context.Context, keyword, country stri
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	case <-s.rateLimiter:
+	case <-s.closed:
+		return nil, ErrServiceClosed
+	case <-s.ticker.C:
 	}
 
 	resp, err := s.client.Do(req)
@@ -291,7 +323,9 @@ func (s *Service) BestsellerAnalysis(ctx context.Context, keyword, country strin
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	case <-s.rateLimiter:
+	case <-s.closed:
+		return nil, ErrServiceClosed
+	case <-s.ticker.C:
 	}
 
 	resp, err := s.client.Do(req)
