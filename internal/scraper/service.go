@@ -53,25 +53,38 @@ func NewService(timeout time.Duration, requestsPerMinute int) *Service {
 
 // Rate exposes the underlying rate limiter channel for callers needing access to raw ticks.
 func (s *Service) Rate() <-chan time.Time {
-	if s.ticker == nil {
+	if s == nil {
 		return nil
 	}
-	return s.ticker.C
+
+	ticker := s.ticker
+	if ticker == nil {
+		return nil
+	}
+
+	return ticker.C
 }
 
 // Close stops the service ticker and unblocks any pending waiters.
 func (s *Service) Close() {
+	if s == nil {
+		return
+	}
+
 	s.closeOnce.Do(func() {
 		if s.ticker != nil {
 			s.ticker.Stop()
 		}
-		close(s.closed)
+		if s.closed != nil {
+			close(s.closed)
+		}
 	})
 }
 
 // waitForRate blocks until the service can issue another outbound request.
 func (s *Service) waitForRate(ctx context.Context) error {
-	if s.ticker == nil {
+	rate := s.Rate()
+	if rate == nil {
 		return nil
 	}
 
@@ -80,7 +93,7 @@ func (s *Service) waitForRate(ctx context.Context) error {
 		return ctx.Err()
 	case <-s.closed:
 		return ErrServiceClosed
-	case <-s.ticker.C:
+	case <-rate:
 		return nil
 	}
 }
