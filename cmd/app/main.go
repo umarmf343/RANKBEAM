@@ -124,19 +124,26 @@ func buildKeywordResearchTab(service *scraper.Service, countries []string, keywo
 	bestsellerView.Bind(bestsellerOutput)
 	bestsellerView.Disable()
 
+	metricControls, metricPanel := newMetricFilterControls()
+	bestsellerControls, bestsellerPanel := newBestsellerFilterControls()
+
 	fetchButton := widget.NewButton("Run Research", func() {
 		keyword := strings.TrimSpace(keywordEntry.Text)
 		country := countrySelect.Selected
+		filters := metricControls.keywordFilter()
+		showDensity := metricControls.showDensity()
+		bestsellerFilter := bestsellerControls.filter()
+		showBSR := bestsellerControls.showBSR()
 		go func() {
 			keywordOutput.Set(fmt.Sprintf("Fetching keyword suggestions for %s...", keyword))
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 
-			suggestions, err := service.KeywordSuggestions(ctx, keyword, country)
+			suggestions, err := service.KeywordSuggestions(ctx, keyword, country, filters)
 			if err != nil {
 				keywordOutput.Set(renderScrapeError(err))
 			} else {
-				formatted, _ := formatKeywordInsights(keyword, suggestions)
+				formatted, _ := formatKeywordInsights(keyword, suggestions, showDensity)
 				keywordOutput.Set(formatted)
 			}
 
@@ -148,11 +155,11 @@ func buildKeywordResearchTab(service *scraper.Service, countries []string, keywo
 				categoryOutput.Set(formatted)
 			}
 
-			bestsellers, err := service.BestsellerAnalysis(ctx, keyword, country)
+			bestsellers, err := service.BestsellerAnalysis(ctx, keyword, country, bestsellerFilter)
 			if err != nil {
 				bestsellerOutput.Set(renderScrapeError(err))
 			} else {
-				formatted, _ := formatBestsellerProducts(bestsellers)
+				formatted, _ := formatBestsellerProducts(bestsellers, showBSR)
 				bestsellerOutput.Set(formatted)
 			}
 		}()
@@ -169,7 +176,15 @@ func buildKeywordResearchTab(service *scraper.Service, countries []string, keywo
 		widget.NewLabelWithStyle("Country", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), countrySelect,
 	)
 
-	return container.NewBorder(container.NewVBox(form, widget.NewSeparator()), fetchButton, nil, nil, grid)
+	controls := container.NewVBox(
+		form,
+		widget.NewSeparator(),
+		metricPanel,
+		widget.NewSeparator(),
+		bestsellerPanel,
+	)
+
+	return container.NewBorder(controls, fetchButton, nil, nil, grid)
 }
 
 func buildCompetitiveTab(service *scraper.Service, countries []string, reverseOutput, campaignOutput binding.String) fyne.CanvasObject {
@@ -198,19 +213,23 @@ func buildCompetitiveTab(service *scraper.Service, countries []string, reverseOu
 	campaignView.Bind(campaignOutput)
 	campaignView.Disable()
 
+	metricControls, metricPanel := newMetricFilterControls()
+
 	reverseButton := widget.NewButton("Reverse ASIN Search", func() {
 		asin := strings.TrimSpace(reverseAsinEntry.Text)
 		country := countrySelect.Selected
+		filters := metricControls.keywordFilter()
+		showDensity := metricControls.showDensity()
 		go func() {
 			reverseOutput.Set(fmt.Sprintf("Running reverse ASIN search for %s...", asin))
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
-			insights, err := service.ReverseASINSearch(ctx, asin, country)
+			insights, err := service.ReverseASINSearch(ctx, asin, country, filters)
 			if err != nil {
 				reverseOutput.Set(renderScrapeError(err))
 				return
 			}
-			formatted, _ := formatKeywordInsights(fmt.Sprintf("ASIN %s", asin), insights)
+			formatted, _ := formatKeywordInsights(fmt.Sprintf("ASIN %s", asin), insights, showDensity)
 			reverseOutput.Set(formatted)
 		}()
 	})
@@ -240,6 +259,8 @@ func buildCompetitiveTab(service *scraper.Service, countries []string, reverseOu
 			widget.NewLabelWithStyle("Country", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), countrySelect,
 			widget.NewLabelWithStyle("Reverse ASIN", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), reverseAsinEntry,
 		),
+		widget.NewSeparator(),
+		metricPanel,
 		widget.NewSeparator(),
 		widget.NewLabelWithStyle("Amazon Ads Planner", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		widget.NewForm(
@@ -312,53 +333,81 @@ func renderScrapeError(err error) string {
 }
 
 func formatProductDetails(product *scraper.ProductDetails) string {
-	return fmt.Sprintf(`Title: %s
-ASIN: %s
-Price: %s (%s)
-Rating: %s
-Reviews: %s
-Availability: %s
-Brand: %s
-Delivery: %s
-URL: %s
-Fetched: %s`,
-		product.Title,
-		product.ASIN,
-		product.Price,
-		product.Currency,
-		product.Rating,
-		product.ReviewCount,
-		product.Availability,
-		product.Brand,
-		product.DeliveryMessage,
-		product.URL,
-		product.FetchedAt.Format(time.RFC1123),
-	)
+	if product == nil {
+		return "No product details available"
+	}
+
+	builder := &strings.Builder{}
+	fmt.Fprintf(builder, "Title: %s\n", product.Title)
+	fmt.Fprintf(builder, "ASIN: %s\n", product.ASIN)
+	fmt.Fprintf(builder, "Price: %s (%s)\n", product.Price, product.Currency)
+	fmt.Fprintf(builder, "Rating: %s\n", product.Rating)
+	fmt.Fprintf(builder, "Reviews: %s\n", product.ReviewCount)
+	fmt.Fprintf(builder, "Availability: %s\n", product.Availability)
+	fmt.Fprintf(builder, "Brand: %s\n", product.Brand)
+	fmt.Fprintf(builder, "Delivery: %s\n", product.DeliveryMessage)
+	if product.Publisher != "" {
+		fmt.Fprintf(builder, "Publisher: %s\n", product.Publisher)
+	} else {
+		builder.WriteString("Publisher: Not available\n")
+	}
+	fmt.Fprintf(builder, "Independent Publisher: %t\n", product.IsIndependent)
+	if len(product.BestSellerRanks) > 0 {
+		builder.WriteString("Best Seller Ranks:\n")
+		for _, rank := range product.BestSellerRanks {
+			fmt.Fprintf(builder, "- #%d in %s\n", rank.Rank, rank.Category)
+		}
+	} else {
+		builder.WriteString("Best Seller Ranks: Not available\n")
+	}
+	if product.TitleDensity >= 0 {
+		fmt.Fprintf(builder, "Title Density: %.2f\n", product.TitleDensity)
+	} else {
+		builder.WriteString("Title Density: N/A\n")
+	}
+	fmt.Fprintf(builder, "URL: %s\n", product.URL)
+	fmt.Fprintf(builder, "Fetched: %s", product.FetchedAt.Format(time.RFC1123))
+
+	return builder.String()
 }
 
-func formatKeywordInsights(title string, insights []scraper.KeywordInsight) (string, string) {
+func formatKeywordInsights(title string, insights []scraper.KeywordInsight, showDensity bool) (string, string) {
 	if len(insights) == 0 {
-		return fmt.Sprintf("No keyword suggestions available for %s", title), ""
+		return fmt.Sprintf("No keyword suggestions available for %s — try relaxing your filters.", title), ""
 	}
 
 	builder := strings.Builder{}
 	builder.WriteString(fmt.Sprintf("Keyword Research for %s\n", title))
 	builder.WriteString(strings.Repeat("=", 40))
 	builder.WriteString("\n")
-	builder.WriteString("Keyword | Search Volume | Competition | Relevancy\n")
-	builder.WriteString(strings.Repeat("-", 60))
-	builder.WriteString("\n")
+
+	header := "Keyword | Search Volume | Competition | Relevancy"
+	if showDensity {
+		header += " | Title Density"
+	}
+	builder.WriteString(header + "\n")
+	builder.WriteString(strings.Repeat("-", len(header)) + "\n")
 
 	records := [][]string{{"Keyword", "Search Volume", "Competition", "Relevancy"}}
+	if showDensity {
+		records[0] = append(records[0], "Title Density")
+	}
 
 	for _, insight := range insights {
-		builder.WriteString(fmt.Sprintf("%s | %d | %.2f | %.2f\n", insight.Keyword, insight.SearchVolume, insight.CompetitionScore, insight.RelevancyScore))
-		records = append(records, []string{
+		row := []string{
 			insight.Keyword,
 			strconv.Itoa(insight.SearchVolume),
 			fmt.Sprintf("%.2f", insight.CompetitionScore),
 			fmt.Sprintf("%.2f", insight.RelevancyScore),
-		})
+		}
+		builder.WriteString(fmt.Sprintf("%s | %d | %.2f | %.2f", insight.Keyword, insight.SearchVolume, insight.CompetitionScore, insight.RelevancyScore))
+		if showDensity {
+			density := densityString(insight.TitleDensity)
+			builder.WriteString(fmt.Sprintf(" | %s", density))
+			row = append(row, density)
+		}
+		builder.WriteString("\n")
+		records = append(records, row)
 	}
 
 	return builder.String(), csvFromRecords(records)
@@ -385,27 +434,55 @@ func formatCategoryTrends(trends []scraper.CategoryTrend) (string, string) {
 	return builder.String(), csvFromRecords(records)
 }
 
-func formatBestsellerProducts(products []scraper.BestsellerProduct) (string, string) {
+func formatBestsellerProducts(products []scraper.BestsellerProduct, showBSR bool) (string, string) {
 	builder := strings.Builder{}
 	builder.WriteString("Bestseller Snapshot\n")
 	builder.WriteString(strings.Repeat("=", 40))
 	builder.WriteString("\n")
 
-	records := [][]string{{"Rank", "Title", "ASIN", "Price", "Rating", "Reviews", "URL"}}
+	headers := []string{"Rank", "Title", "ASIN", "Price", "Rating", "Reviews"}
+	if showBSR {
+		headers = append(headers, "Best Seller Rank", "Category")
+	}
+	headers = append(headers, "Publisher", "Independent", "Title Density", "URL")
+
+	records := [][]string{headers}
 
 	for _, product := range products {
 		builder.WriteString(fmt.Sprintf("#%d %s\n", product.Rank, product.Title))
 		builder.WriteString(fmt.Sprintf("ASIN: %s | Price: %s | Rating: %s | Reviews: %s\n", product.ASIN, product.Price, product.Rating, product.ReviewCount))
+		if showBSR {
+			if product.BestSeller > 0 {
+				builder.WriteString(fmt.Sprintf("Best Seller Rank: #%d (%s)\n", product.BestSeller, product.Category))
+			} else {
+				builder.WriteString("Best Seller Rank: Not available\n")
+			}
+		}
+		publisher := product.Publisher
+		if strings.TrimSpace(publisher) == "" {
+			publisher = "Unknown"
+		}
+		builder.WriteString(fmt.Sprintf("Publisher: %s | Independent: %t\n", publisher, product.IsIndie))
+		builder.WriteString(fmt.Sprintf("Title Density: %s\n", densityString(product.TitleDensity)))
 		builder.WriteString(fmt.Sprintf("URL: %s\n\n", product.URL))
-		records = append(records, []string{
+
+		row := []string{
 			strconv.Itoa(product.Rank),
 			product.Title,
 			product.ASIN,
 			product.Price,
 			product.Rating,
 			product.ReviewCount,
-			product.URL,
-		})
+		}
+		if showBSR {
+			bsrValue := ""
+			if product.BestSeller > 0 {
+				bsrValue = strconv.Itoa(product.BestSeller)
+			}
+			row = append(row, bsrValue, product.Category)
+		}
+		row = append(row, publisher, fmt.Sprintf("%t", product.IsIndie), densityString(product.TitleDensity), product.URL)
+		records = append(records, row)
 	}
 
 	return builder.String(), csvFromRecords(records)
@@ -497,4 +574,167 @@ func csvFromRecords(records [][]string) string {
 	}
 
 	return builder.String()
+}
+
+type metricFilterControls struct {
+	searchCheck      *widget.Check
+	searchEntry      *widget.Entry
+	competitionCheck *widget.Check
+	competitionEntry *widget.Entry
+	densityCheck     *widget.Check
+	densityEntry     *widget.Entry
+}
+
+func newMetricFilterControls() (*metricFilterControls, fyne.CanvasObject) {
+	controls := &metricFilterControls{}
+
+	controls.searchEntry = widget.NewEntry()
+	controls.searchEntry.SetText("500")
+	controls.searchEntry.SetPlaceHolder("500")
+	controls.searchEntry.Disable()
+	controls.searchCheck = widget.NewCheck("Search volume ≥", func(checked bool) {
+		if checked {
+			controls.searchEntry.Enable()
+		} else {
+			controls.searchEntry.Disable()
+		}
+	})
+
+	controls.competitionEntry = widget.NewEntry()
+	controls.competitionEntry.SetText("0.60")
+	controls.competitionEntry.SetPlaceHolder("0.60")
+	controls.competitionEntry.Disable()
+	controls.competitionCheck = widget.NewCheck("Competition ≤", func(checked bool) {
+		if checked {
+			controls.competitionEntry.Enable()
+		} else {
+			controls.competitionEntry.Disable()
+		}
+	})
+
+	controls.densityEntry = widget.NewEntry()
+	controls.densityEntry.SetText("0.40")
+	controls.densityEntry.SetPlaceHolder("0.40")
+	controls.densityEntry.Disable()
+	controls.densityCheck = widget.NewCheck("Title density ≤", func(checked bool) {
+		if checked {
+			controls.densityEntry.Enable()
+		} else {
+			controls.densityEntry.Disable()
+		}
+	})
+
+	panel := container.NewVBox(
+		widget.NewLabelWithStyle("Metric Filters", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		container.NewHBox(controls.searchCheck, controls.searchEntry),
+		container.NewHBox(controls.competitionCheck, controls.competitionEntry),
+		container.NewHBox(controls.densityCheck, controls.densityEntry),
+	)
+
+	return controls, panel
+}
+
+func (c *metricFilterControls) keywordFilter() scraper.KeywordFilter {
+	filter := scraper.KeywordFilter{}
+	if c.searchCheck.Checked {
+		filter.MinSearchVolume = parsePositiveInt(c.searchEntry.Text, 500)
+	}
+	if c.competitionCheck.Checked {
+		filter.MaxCompetitionScore = parsePositiveFloat(c.competitionEntry.Text, 0.6)
+	}
+	if c.densityCheck.Checked {
+		filter.MaxTitleDensity = parsePositiveFloat(c.densityEntry.Text, 0.4)
+	}
+	return filter
+}
+
+func (c *metricFilterControls) showDensity() bool {
+	return c != nil && c.densityCheck.Checked
+}
+
+type bestsellerFilterControls struct {
+	indieCheck      *widget.Check
+	bsrLimitCheck   *widget.Check
+	bsrEntry        *widget.Entry
+	bsrDisplayCheck *widget.Check
+}
+
+func newBestsellerFilterControls() (*bestsellerFilterControls, fyne.CanvasObject) {
+	controls := &bestsellerFilterControls{}
+
+	controls.indieCheck = widget.NewCheck("Independent publishers only", nil)
+
+	controls.bsrEntry = widget.NewEntry()
+	controls.bsrEntry.SetText("50000")
+	controls.bsrEntry.SetPlaceHolder("50000")
+	controls.bsrEntry.Disable()
+	controls.bsrLimitCheck = widget.NewCheck("Limit BSR to ≤", func(checked bool) {
+		if checked {
+			controls.bsrEntry.Enable()
+		} else {
+			controls.bsrEntry.Disable()
+		}
+	})
+
+	controls.bsrDisplayCheck = widget.NewCheck("Show BSR details", nil)
+	controls.bsrDisplayCheck.Checked = true
+	controls.bsrDisplayCheck.Refresh()
+
+	panel := container.NewVBox(
+		widget.NewLabelWithStyle("Bestseller Filters", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		controls.indieCheck,
+		container.NewHBox(controls.bsrLimitCheck, controls.bsrEntry),
+		controls.bsrDisplayCheck,
+	)
+
+	return controls, panel
+}
+
+func (c *bestsellerFilterControls) filter() scraper.BestsellerFilter {
+	filter := scraper.BestsellerFilter{}
+	if c.indieCheck.Checked {
+		filter.IndependentOnly = true
+	}
+	if c.bsrLimitCheck.Checked {
+		filter.MaxBestSellerRank = parsePositiveInt(c.bsrEntry.Text, 50000)
+	}
+	return filter
+}
+
+func (c *bestsellerFilterControls) showBSR() bool {
+	if c == nil {
+		return false
+	}
+	return c.bsrDisplayCheck.Checked || c.bsrLimitCheck.Checked
+}
+
+func parsePositiveInt(value string, fallback int) int {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return fallback
+	}
+	parsed, err := strconv.Atoi(trimmed)
+	if err != nil || parsed < 0 {
+		return fallback
+	}
+	return parsed
+}
+
+func parsePositiveFloat(value string, fallback float64) float64 {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseFloat(trimmed, 64)
+	if err != nil || parsed < 0 {
+		return fallback
+	}
+	return parsed
+}
+
+func densityString(value float64) string {
+	if value < 0 {
+		return "N/A"
+	}
+	return fmt.Sprintf("%.2f", value)
 }

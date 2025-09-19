@@ -9,7 +9,9 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -30,6 +32,7 @@ type Service struct {
 var (
 	ErrServiceClosed = errors.New("scraper service closed")
 	ErrBotDetected   = errors.New("amazon requested captcha verification")
+	bsrPattern       = regexp.MustCompile(`#([0-9,]+)\s+in\s+([^()\n>]+)`)
 )
 
 // NewService creates a scraper service with sane defaults such as timeout handling,
@@ -170,6 +173,20 @@ func (s *Service) FetchProduct(ctx context.Context, asin, country string) (*Prod
 		delivery = textOrFallback(doc.Find("#deliveryMessageMirId span"), "Delivery information unavailable")
 	}
 
+	publisher := parsePublisher(doc)
+	ranks := parseBestSellerRanks(doc)
+	indie := isIndependentPublisher(publisher)
+
+	titleDensity := -1.0
+	if strings.TrimSpace(title) != "" {
+		densityCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
+		density, err := s.computeTitleDensity(densityCtx, title, country)
+		cancel()
+		if err == nil {
+			titleDensity = math.Round(density*100) / 100
+		}
+	}
+
 	return &ProductDetails{
 		Title:           title,
 		ASIN:            strings.ToUpper(asin),
@@ -181,6 +198,10 @@ func (s *Service) FetchProduct(ctx context.Context, asin, country string) (*Prod
 		Brand:           brand,
 		ImageURL:        image,
 		DeliveryMessage: delivery,
+		Publisher:       publisher,
+		BestSellerRanks: ranks,
+		IsIndependent:   indie,
+		TitleDensity:    titleDensity,
 		FetchedAt:       time.Now(),
 		URL:             endpoint,
 	}, nil
@@ -195,7 +216,7 @@ type keywordSuggestionResponse struct {
 }
 
 // KeywordSuggestions fetches Amazon completion API suggestions.
-func (s *Service) KeywordSuggestions(ctx context.Context, keyword, country string) ([]KeywordInsight, error) {
+func (s *Service) KeywordSuggestions(ctx context.Context, keyword, country string, filters KeywordFilter) ([]KeywordInsight, error) {
 	keyword = strings.TrimSpace(keyword)
 	if keyword == "" {
 		return nil, errors.New("keyword is required")
@@ -260,8 +281,24 @@ func (s *Service) KeywordSuggestions(ctx context.Context, keyword, country strin
 			SearchVolume:     searchVolume,
 			CompetitionScore: math.Round(competition*100) / 100,
 			RelevancyScore:   math.Round(relevancy*100) / 100,
+			TitleDensity:     -1,
 		})
 	}
+
+	for i := range insights {
+		if i >= 10 {
+			break
+		}
+		densityCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		density, err := s.computeTitleDensity(densityCtx, insights[i].Keyword, country)
+		cancel()
+		if err != nil {
+			continue
+		}
+		insights[i].TitleDensity = math.Round(density*100) / 100
+	}
+
+	insights = filterKeywordInsights(insights, filters)
 
 	return insights, nil
 }
@@ -339,7 +376,7 @@ func (s *Service) CategorySuggestions(ctx context.Context, keyword, country stri
 }
 
 // BestsellerAnalysis scrapes the first page of Amazon search results and treats them as bestseller insights.
-func (s *Service) BestsellerAnalysis(ctx context.Context, keyword, country string) ([]BestsellerProduct, error) {
+func (s *Service) BestsellerAnalysis(ctx context.Context, keyword, country string, filter BestsellerFilter) ([]BestsellerProduct, error) {
 	keyword = strings.TrimSpace(keyword)
 	if keyword == "" {
 		return nil, errors.New("keyword is required")
@@ -382,10 +419,18 @@ func (s *Service) BestsellerAnalysis(ctx context.Context, keyword, country strin
 	}
 
 	products := []BestsellerProduct{}
+	keywordLower := strings.ToLower(keyword)
+	totalResults := 0
+	densityMatches := 0
+
 	doc.Find("div.s-main-slot div[data-component-type='s-search-result']").EachWithBreak(func(i int, selection *goquery.Selection) bool {
 		title := strings.TrimSpace(selection.Find("h2 span").Text())
 		if title == "" {
 			return true
+		}
+		totalResults++
+		if strings.Contains(strings.ToLower(title), keywordLower) {
+			densityMatches++
 		}
 		price := firstNonEmpty(
 			strings.TrimSpace(selection.Find("span.a-price span.a-offscreen").First().Text()),
@@ -402,26 +447,72 @@ func (s *Service) BestsellerAnalysis(ctx context.Context, keyword, country strin
 			reviews = strings.TrimSpace(selection.Find("span[aria-label$='rating']").First().Text())
 		}
 		products = append(products, BestsellerProduct{
-			Rank:        len(products) + 1,
-			Title:       title,
-			ASIN:        asin,
-			Price:       price,
-			Rating:      rating,
-			ReviewCount: reviews,
-			URL:         link,
+			Rank:         len(products) + 1,
+			Title:        title,
+			ASIN:         asin,
+			Price:        price,
+			Rating:       rating,
+			ReviewCount:  reviews,
+			Publisher:    "",
+			BestSeller:   0,
+			Category:     "",
+			IsIndie:      false,
+			TitleDensity: -1,
+			URL:          link,
 		})
 		return len(products) < 10
 	})
 
 	if len(products) == 0 {
-		products = append(products, BestsellerProduct{Rank: 0, Title: "No bestseller data found", Price: "-", Rating: "-", ReviewCount: "-"})
+		products = append(products, BestsellerProduct{Rank: 0, Title: "No bestseller data found", Price: "-", Rating: "-", ReviewCount: "-", TitleDensity: 0})
 	}
 
-	return products, nil
+	baseDensity := 0.0
+	if totalResults > 0 {
+		baseDensity = float64(densityMatches) / float64(totalResults)
+	}
+
+	for i := range products {
+		products[i].TitleDensity = math.Round(baseDensity*100) / 100
+		if products[i].ASIN == "" || i >= 5 {
+			continue
+		}
+		detailCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+		detail, err := s.FetchProduct(detailCtx, products[i].ASIN, country)
+		cancel()
+		if err != nil {
+			continue
+		}
+		products[i].Publisher = detail.Publisher
+		products[i].IsIndie = detail.IsIndependent
+		if len(detail.BestSellerRanks) > 0 {
+			products[i].BestSeller = detail.BestSellerRanks[0].Rank
+			products[i].Category = detail.BestSellerRanks[0].Category
+		}
+		if detail.TitleDensity >= 0 {
+			products[i].TitleDensity = detail.TitleDensity
+		}
+	}
+
+	filtered := make([]BestsellerProduct, 0, len(products))
+	for _, product := range products {
+		if filter.IndependentOnly && !product.IsIndie {
+			continue
+		}
+		if filter.MaxBestSellerRank > 0 && product.BestSeller > filter.MaxBestSellerRank && product.BestSeller != 0 {
+			continue
+		}
+		filtered = append(filtered, product)
+	}
+	if len(filtered) == 0 {
+		filtered = products
+	}
+
+	return filtered, nil
 }
 
 // ReverseASINSearch derives keyword opportunities from the scraped product title and subtitle.
-func (s *Service) ReverseASINSearch(ctx context.Context, asin, country string) ([]KeywordInsight, error) {
+func (s *Service) ReverseASINSearch(ctx context.Context, asin, country string, filters KeywordFilter) ([]KeywordInsight, error) {
 	product, err := s.FetchProduct(ctx, asin, country)
 	if err != nil {
 		return nil, err
@@ -444,7 +535,7 @@ func (s *Service) ReverseASINSearch(ctx context.Context, asin, country string) (
 			continue
 		}
 		seen[clean] = struct{}{}
-		keywords, err := s.KeywordSuggestions(ctx, clean, country)
+		keywords, err := s.KeywordSuggestions(ctx, clean, country, filters)
 		if err != nil {
 			continue
 		}
@@ -455,7 +546,7 @@ func (s *Service) ReverseASINSearch(ctx context.Context, asin, country string) (
 	}
 
 	if len(insights) == 0 {
-		return []KeywordInsight{{Keyword: product.Title, SearchVolume: 500, CompetitionScore: 0.5, RelevancyScore: 0.9}}, nil
+		return []KeywordInsight{{Keyword: product.Title, SearchVolume: 500, CompetitionScore: 0.5, RelevancyScore: 0.9, TitleDensity: product.TitleDensity}}, nil
 	}
 
 	return insights, nil
@@ -498,7 +589,7 @@ func (s *Service) GenerateAMSKeywords(ctx context.Context, title, description st
 	scored := []scoredKeyword{}
 	for token, weight := range bag {
 		kwCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
-		insights, err := s.KeywordSuggestions(kwCtx, token, country)
+		insights, err := s.KeywordSuggestions(kwCtx, token, country, KeywordFilter{})
 		cancel()
 		if err != nil || len(insights) == 0 {
 			scored = append(scored, scoredKeyword{keyword: token, score: float64(weight) * 0.7})
@@ -554,7 +645,7 @@ func (s *Service) InternationalKeywords(ctx context.Context, keyword string, cou
 	for _, country := range countries {
 		cfg := ConfigFor(country)
 		kwCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
-		insights, err := s.KeywordSuggestions(kwCtx, keyword, country)
+		insights, err := s.KeywordSuggestions(kwCtx, keyword, country, KeywordFilter{})
 		cancel()
 		if err != nil {
 			continue
@@ -593,6 +684,222 @@ func FlagIllegalKeywords(keywords []string) []string {
 		}
 	}
 	return flagged
+}
+
+func (s *Service) computeTitleDensity(ctx context.Context, keyword, country string) (float64, error) {
+	keyword = strings.TrimSpace(keyword)
+	if keyword == "" {
+		return 0, errors.New("keyword is required")
+	}
+
+	cfg := ConfigFor(strings.ToUpper(country))
+	endpoint := fmt.Sprintf("https://%s/s", cfg.Host)
+
+	params := url.Values{}
+	params.Set("k", keyword)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+"?"+params.Encode(), nil)
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("User-Agent", s.userAgent())
+	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
+
+	if err := s.waitForRate(ctx); err != nil {
+		return 0, err
+	}
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("title density request failed with status %d", resp.StatusCode)
+	}
+
+	doc, err := goquery.NewDocumentFromReader(resp.Body)
+	if err != nil {
+		return 0, err
+	}
+	if err := detectBotChallenge(doc); err != nil {
+		return 0, err
+	}
+
+	total := 0
+	matches := 0
+	needle := strings.ToLower(keyword)
+	doc.Find("div.s-main-slot div[data-component-type='s-search-result']").EachWithBreak(func(i int, selection *goquery.Selection) bool {
+		if total >= 10 {
+			return false
+		}
+		title := strings.TrimSpace(selection.Find("h2 span").Text())
+		if title == "" {
+			return true
+		}
+		total++
+		if strings.Contains(strings.ToLower(title), needle) {
+			matches++
+		}
+		return total < 10
+	})
+
+	if total == 0 {
+		return 0, nil
+	}
+
+	return float64(matches) / float64(total), nil
+}
+
+func parsePublisher(doc *goquery.Document) string {
+	if doc == nil {
+		return ""
+	}
+
+	publisher := ""
+	doc.Find("#detailBullets_feature_div li").Each(func(i int, selection *goquery.Selection) {
+		text := strings.TrimSpace(selection.Text())
+		if text == "" {
+			return
+		}
+		if strings.Contains(strings.ToLower(text), "publisher") {
+			parts := strings.SplitN(text, ":", 2)
+			if len(parts) == 2 {
+				publisher = strings.TrimSpace(parts[1])
+			} else if publisher == "" {
+				publisher = text
+			}
+		}
+	})
+
+	if publisher != "" {
+		return publisher
+	}
+
+	doc.Find("#productDetailsTable tr").Each(func(i int, selection *goquery.Selection) {
+		header := strings.TrimSpace(selection.Find("th").Text())
+		if strings.EqualFold(header, "Publisher") {
+			value := strings.TrimSpace(selection.Find("td").Text())
+			if value != "" {
+				publisher = value
+			}
+		}
+	})
+
+	if publisher != "" {
+		return publisher
+	}
+
+	doc.Find("#productDetails_detailBullets_sections1 tr").Each(func(i int, selection *goquery.Selection) {
+		header := strings.TrimSpace(selection.Find("th").Text())
+		if strings.EqualFold(header, "Publisher") {
+			value := strings.TrimSpace(selection.Find("td").Text())
+			if value != "" {
+				publisher = value
+			}
+		}
+	})
+
+	return publisher
+}
+
+func parseBestSellerRanks(doc *goquery.Document) []BestSellerRank {
+	ranks := []BestSellerRank{}
+	if doc == nil {
+		return ranks
+	}
+
+	sections := []string{}
+	doc.Find("#detailBullets_feature_div li").Each(func(i int, selection *goquery.Selection) {
+		text := strings.TrimSpace(selection.Text())
+		if strings.Contains(strings.ToLower(text), "best sellers rank") {
+			sections = append(sections, text)
+		}
+	})
+
+	doc.Find("#productDetailsTable tr").Each(func(i int, selection *goquery.Selection) {
+		header := strings.TrimSpace(selection.Find("th").Text())
+		if strings.Contains(strings.ToLower(header), "best sellers rank") {
+			body := strings.TrimSpace(selection.Find("td").Text())
+			if body != "" {
+				sections = append(sections, body)
+			}
+		}
+	})
+
+	doc.Find("#productDetails_detailBullets_sections1 tr").Each(func(i int, selection *goquery.Selection) {
+		header := strings.TrimSpace(selection.Find("th").Text())
+		if strings.Contains(strings.ToLower(header), "best sellers rank") {
+			body := strings.TrimSpace(selection.Find("td").Text())
+			if body != "" {
+				sections = append(sections, body)
+			}
+		}
+	})
+
+	for _, section := range sections {
+		matches := bsrPattern.FindAllStringSubmatch(section, -1)
+		for _, match := range matches {
+			if len(match) < 3 {
+				continue
+			}
+			rawRank := strings.ReplaceAll(match[1], ",", "")
+			rank, err := strconv.Atoi(rawRank)
+			if err != nil {
+				continue
+			}
+			category := strings.TrimSpace(match[2])
+			category = strings.Trim(category, "›>")
+			category = strings.TrimSpace(category)
+			ranks = append(ranks, BestSellerRank{Category: category, Rank: rank})
+		}
+	}
+
+	return ranks
+}
+
+func isIndependentPublisher(publisher string) bool {
+	if publisher == "" {
+		return false
+	}
+
+	lower := strings.ToLower(publisher)
+	keywords := []string{"independently published", "independent", "self-published", "self published"}
+	for _, keyword := range keywords {
+		if strings.Contains(lower, keyword) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func filterKeywordInsights(insights []KeywordInsight, filters KeywordFilter) []KeywordInsight {
+	if filters.MinSearchVolume <= 0 && filters.MaxCompetitionScore <= 0 && filters.MaxTitleDensity <= 0 {
+		return insights
+	}
+
+	filtered := make([]KeywordInsight, 0, len(insights))
+	for _, insight := range insights {
+		if filters.MinSearchVolume > 0 && insight.SearchVolume < filters.MinSearchVolume {
+			continue
+		}
+		if filters.MaxCompetitionScore > 0 && insight.CompetitionScore > filters.MaxCompetitionScore {
+			continue
+		}
+		if filters.MaxTitleDensity > 0 {
+			if insight.TitleDensity < 0 {
+				continue
+			}
+			if insight.TitleDensity > filters.MaxTitleDensity {
+				continue
+			}
+		}
+		filtered = append(filtered, insight)
+	}
+
+	return filtered
 }
 
 // helper functions ---------------------------------------------------------
