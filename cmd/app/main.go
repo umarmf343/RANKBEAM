@@ -23,6 +23,7 @@ func main() {
 	application.Settings().SetTheme(theme.LightTheme())
 
 	service := scraper.NewService(25*time.Second, 25)
+	defer service.Close()
 
 	window := application.NewWindow("Amazon Product Intelligence Suite")
 	window.Resize(fyne.NewSize(1024, 720))
