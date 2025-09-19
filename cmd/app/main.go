@@ -524,7 +524,7 @@ func formatKeywordInsights(title string, insights []scraper.KeywordInsight) (str
 		return fmt.Sprintf("No keyword suggestions available for %s", title), ""
 	}
 
-	builder := strings.Builder{}
+	var builder strings.Builder
 	builder.WriteString(fmt.Sprintf("Keyword Research for %s\n", title))
 	builder.WriteString(strings.Repeat("=", 40))
 	builder.WriteString("\n")
@@ -546,7 +546,7 @@ func formatKeywordInsights(title string, insights []scraper.KeywordInsight) (str
 }
 
 func formatCategoryTrends(trends []scraper.CategoryTrend) (string, string) {
-	builder := strings.Builder{}
+	var builder strings.Builder
 	builder.WriteString("Category Intelligence\n")
 	builder.WriteString(strings.Repeat("=", 40))
 	builder.WriteString("\n")
@@ -564,7 +564,7 @@ func formatCategoryTrends(trends []scraper.CategoryTrend) (string, string) {
 }
 
 func formatBestsellerProducts(products []scraper.BestsellerProduct) (string, string) {
-	builder := strings.Builder{}
+	var builder strings.Builder
 	builder.WriteString("Bestseller Snapshot\n")
 	builder.WriteString(strings.Repeat("=", 40))
 	builder.WriteString("\n")
@@ -590,7 +590,7 @@ func formatCampaignKeywords(keywords, flagged []string) (string, string) {
 	if len(keywords) == 0 {
 		return "Unable to generate keyword suggestions. Provide more metadata.", ""
 	}
-	builder := strings.Builder{}
+	var builder strings.Builder
 	builder.WriteString("Amazon Ads Keyword Portfolio\n")
 	builder.WriteString(strings.Repeat("=", 40))
 	builder.WriteString("\n")
@@ -625,7 +625,7 @@ func formatCampaignKeywords(keywords, flagged []string) (string, string) {
 }
 
 func formatInternationalKeywords(results []scraper.InternationalKeyword) (string, string) {
-	builder := strings.Builder{}
+	var builder strings.Builder
 	builder.WriteString("International Keyword Radar\n")
 	builder.WriteString(strings.Repeat("=", 40))
 	builder.WriteString("\n")
