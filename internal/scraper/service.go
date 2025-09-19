@@ -27,7 +27,10 @@ type Service struct {
 }
 
 // ErrServiceClosed indicates the scraper service has been closed.
-var ErrServiceClosed = errors.New("scraper service closed")
+var (
+	ErrServiceClosed = errors.New("scraper service closed")
+	ErrBotDetected   = errors.New("amazon requested captcha verification")
+)
 
 // NewService creates a scraper service with sane defaults such as timeout handling,
 // rate limiting and a pool of realistic user agents.
@@ -142,6 +145,9 @@ func (s *Service) FetchProduct(ctx context.Context, asin, country string) (*Prod
 
 	doc, err := goquery.NewDocumentFromReader(resp.Body)
 	if err != nil {
+		return nil, err
+	}
+	if err := detectBotChallenge(doc); err != nil {
 		return nil, err
 	}
 
@@ -298,6 +304,9 @@ func (s *Service) CategorySuggestions(ctx context.Context, keyword, country stri
 	if err != nil {
 		return nil, err
 	}
+	if err := detectBotChallenge(doc); err != nil {
+		return nil, err
+	}
 
 	trends := []CategoryTrend{}
 	doc.Find("#departments ul li").Each(func(i int, selection *goquery.Selection) {
@@ -366,6 +375,9 @@ func (s *Service) BestsellerAnalysis(ctx context.Context, keyword, country strin
 
 	doc, err := goquery.NewDocumentFromReader(resp.Body)
 	if err != nil {
+		return nil, err
+	}
+	if err := detectBotChallenge(doc); err != nil {
 		return nil, err
 	}
 
@@ -585,6 +597,26 @@ func FlagIllegalKeywords(keywords []string) []string {
 
 // helper functions ---------------------------------------------------------
 
+func detectBotChallenge(doc *goquery.Document) error {
+	if doc == nil {
+		return nil
+	}
+
+	if doc.Find(`form[action*="validateCaptcha"]`).Length() > 0 {
+		return ErrBotDetected
+	}
+	if doc.Find("#captchacharacters").Length() > 0 {
+		return ErrBotDetected
+	}
+
+	content := strings.ToLower(doc.Text())
+	if strings.Contains(content, "enter the characters you see") || strings.Contains(content, "type the characters you see") {
+		return ErrBotDetected
+	}
+
+	return nil
+}
+
 func textOrFallback(sel *goquery.Selection, fallback string) string {
 	value := strings.TrimSpace(sel.First().Text())
 	if value == "" {
@@ -601,4 +633,3 @@ func firstNonEmpty(values ...string) string {
 	}
 	return ""
 }
-

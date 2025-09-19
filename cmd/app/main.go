@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -80,7 +81,7 @@ func buildProductLookupTab(service *scraper.Service, countries []string, output 
 			defer cancel()
 			product, err := service.FetchProduct(ctx, asin, country)
 			if err != nil {
-				output.Set(fmt.Sprintf("Error: %v", err))
+				output.Set(renderScrapeError(err))
 				return
 			}
 			output.Set(formatProductDetails(product))
@@ -131,21 +132,21 @@ func buildKeywordResearchTab(service *scraper.Service, countries []string, keywo
 
 			suggestions, err := service.KeywordSuggestions(ctx, keyword, country)
 			if err != nil {
-				keywordOutput.Set(fmt.Sprintf("Error: %v", err))
+				keywordOutput.Set(renderScrapeError(err))
 			} else {
 				keywordOutput.Set(formatKeywordInsights(keyword, suggestions))
 			}
 
 			categories, err := service.CategorySuggestions(ctx, keyword, country)
 			if err != nil {
-				categoryOutput.Set(fmt.Sprintf("Error: %v", err))
+				categoryOutput.Set(renderScrapeError(err))
 			} else {
 				categoryOutput.Set(formatCategoryTrends(categories))
 			}
 
 			bestsellers, err := service.BestsellerAnalysis(ctx, keyword, country)
 			if err != nil {
-				bestsellerOutput.Set(fmt.Sprintf("Error: %v", err))
+				bestsellerOutput.Set(renderScrapeError(err))
 			} else {
 				bestsellerOutput.Set(formatBestsellerProducts(bestsellers))
 			}
@@ -201,7 +202,7 @@ func buildCompetitiveTab(service *scraper.Service, countries []string, reverseOu
 			defer cancel()
 			insights, err := service.ReverseASINSearch(ctx, asin, country)
 			if err != nil {
-				reverseOutput.Set(fmt.Sprintf("Error: %v", err))
+				reverseOutput.Set(renderScrapeError(err))
 				return
 			}
 			reverseOutput.Set(formatKeywordInsights(fmt.Sprintf("ASIN %s", asin), insights))
@@ -217,7 +218,7 @@ func buildCompetitiveTab(service *scraper.Service, countries []string, reverseOu
 			defer cancel()
 			keywords, err := service.GenerateAMSKeywords(ctx, titleEntry.Text, descriptionEntry.Text, competitors, country)
 			if err != nil {
-				campaignOutput.Set(fmt.Sprintf("Error: %v", err))
+				campaignOutput.Set(renderScrapeError(err))
 				return
 			}
 			flagged := scraper.FlagIllegalKeywords(keywords)
@@ -274,7 +275,7 @@ func buildInternationalTab(service *scraper.Service, countries []string, output 
 			defer cancel()
 			keywords, err := service.InternationalKeywords(ctx, keyword, selected)
 			if err != nil {
-				output.Set(fmt.Sprintf("Error: %v", err))
+				output.Set(renderScrapeError(err))
 				return
 			}
 			output.Set(formatInternationalKeywords(keywords))
@@ -290,6 +291,16 @@ func buildInternationalTab(service *scraper.Service, countries []string, output 
 	)
 
 	return container.NewBorder(form, fetchButton, nil, nil, outputView)
+}
+
+func renderScrapeError(err error) string {
+	if err == nil {
+		return ""
+	}
+	if errors.Is(err, scraper.ErrBotDetected) {
+		return "Amazon is asking for a captcha/robot check. Please slow down, retry later, or rotate your network/proxy."
+	}
+	return fmt.Sprintf("Error: %v", err)
 }
 
 func formatProductDetails(product *scraper.ProductDetails) string {
