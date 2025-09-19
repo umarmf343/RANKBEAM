@@ -16,6 +16,9 @@ import (
 	"github.com/PuerkitoBio/goquery"
 )
 
+// ErrBotDetected indicates that Amazon has responded with a captcha or bot verification challenge.
+var ErrBotDetected = errors.New("amazon responded with a bot verification challenge")
+
 // Service encapsulates HTTP access and scraping helpers used by the application.
 type Service struct {
 	client      *http.Client
@@ -76,6 +79,9 @@ func (s *Service) FetchProduct(ctx context.Context, asin, country string) (*Prod
 
 	doc, err := goquery.NewDocumentFromReader(resp.Body)
 	if err != nil {
+		return nil, err
+	}
+	if err := detectBotChallenge(doc); err != nil {
 		return nil, err
 	}
 
@@ -236,6 +242,9 @@ func (s *Service) CategorySuggestions(ctx context.Context, keyword, country stri
 	if err != nil {
 		return nil, err
 	}
+	if err := detectBotChallenge(doc); err != nil {
+		return nil, err
+	}
 
 	trends := []CategoryTrend{}
 	doc.Find("#departments ul li").Each(func(i int, selection *goquery.Selection) {
@@ -306,6 +315,9 @@ func (s *Service) BestsellerAnalysis(ctx context.Context, keyword, country strin
 
 	doc, err := goquery.NewDocumentFromReader(resp.Body)
 	if err != nil {
+		return nil, err
+	}
+	if err := detectBotChallenge(doc); err != nil {
 		return nil, err
 	}
 
@@ -520,6 +532,22 @@ func FlagIllegalKeywords(keywords []string) []string {
 }
 
 // helper functions ---------------------------------------------------------
+
+func detectBotChallenge(doc *goquery.Document) error {
+	if doc == nil {
+		return nil
+	}
+	if doc.Find("form[action*='validateCaptcha']").Length() > 0 {
+		return ErrBotDetected
+	}
+	if doc.Find("#captchacharacters").Length() > 0 {
+		return ErrBotDetected
+	}
+	if strings.Contains(strings.ToLower(doc.Text()), "enter the characters you see") {
+		return ErrBotDetected
+	}
+	return nil
+}
 
 func textOrFallback(sel *goquery.Selection, fallback string) string {
 	value := strings.TrimSpace(sel.First().Text())
