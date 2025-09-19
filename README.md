@@ -115,8 +115,8 @@ Options:
   --random-ua     Randomize user agent version. This helps to prevent request
                   blocking from the amazon side       [boolean] [default: false]
   --user-agent    Set custom user-agent                   [string] [default: ""]
-  --timeout, -t   Timeout between requests. Timeout is set in mls: 1000 mls = 1
-
+  --timeout, -t   Request timeout in milliseconds (1000 ms = 1 second)
+                                                      [number] [default: 15000]
 
 Examples:
   amazon-buddy products -k 'Xbox one'
@@ -859,8 +859,8 @@ const options = {
     //Randomize user agent version. This helps to prevent request blocking from the amazon side
     randomUa: false,
 
-    //Timeout between requests. Timeout is set in mls: 1000 mls = 1 second
-    timeout: 0,
+    //Request timeout in milliseconds (1000 ms = 1 second)
+    timeout: 15000,
 };
 ```
 

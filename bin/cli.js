@@ -133,9 +133,9 @@ require('yargs')
         },
         timeout: {
             alias: 't',
-            default: 0,
+            default: 15000,
             type: 'number',
-            describe: 'Timeout between requests. Timeout is set in mls: 1000 mls = 1 second',
+            describe: 'Request timeout in milliseconds (default: 15000).',
         },
     })
     .check((argv) => {
