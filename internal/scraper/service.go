@@ -35,8 +35,10 @@ func NewService(timeout time.Duration, requestsPerMinute int) *Service {
 	if requestsPerMinute <= 0 {
 		requestsPerMinute = 20
 	}
+
 	interval := time.Minute / time.Duration(requestsPerMinute)
 	ticker := time.NewTicker(interval)
+
 	return &Service{
 		client: &http.Client{Timeout: timeout},
 		ticker: ticker,
@@ -67,6 +69,33 @@ func (s *Service) Close() {
 	})
 }
 
+// waitForRate blocks until the service can issue another outbound request.
+func (s *Service) waitForRate(ctx context.Context) error {
+	if s.ticker == nil {
+		return nil
+	}
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-s.closed:
+		return ErrServiceClosed
+	case <-s.ticker.C:
+		return nil
+	}
+}
+
+func (s *Service) userAgent() string {
+	if len(s.userAgents) == 0 {
+		return "Mozilla/5.0 (compatible; scraperbot/1.0)"
+	}
+	idx := int(time.Now().UnixNano()) % len(s.userAgents)
+	if idx < 0 {
+		idx = -idx
+	}
+	return s.userAgents[idx]
+}
+
 // FetchProduct retrieves product information by ASIN for the requested country marketplace.
 func (s *Service) FetchProduct(ctx context.Context, asin, country string) (*ProductDetails, error) {
 	asin = strings.TrimSpace(asin)
@@ -81,15 +110,11 @@ func (s *Service) FetchProduct(ctx context.Context, asin, country string) (*Prod
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", s.userAgents[int(time.Now().UnixNano())%len(s.userAgents)])
+	req.Header.Set("User-Agent", s.userAgent())
 	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
 
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case <-s.closed:
-		return nil, ErrServiceClosed
-	case <-s.ticker.C:
+	if err := s.waitForRate(ctx); err != nil {
+		return nil, err
 	}
 
 	resp, err := s.client.Do(req)
@@ -174,15 +199,11 @@ func (s *Service) KeywordSuggestions(ctx context.Context, keyword, country strin
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", s.userAgents[int(time.Now().UnixNano())%len(s.userAgents)])
+	req.Header.Set("User-Agent", s.userAgent())
 	req.Header.Set("Accept", "application/json")
 
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case <-s.closed:
-		return nil, ErrServiceClosed
-	case <-s.ticker.C:
+	if err := s.waitForRate(ctx); err != nil {
+		return nil, err
 	}
 
 	resp, err := s.client.Do(req)
@@ -243,15 +264,11 @@ func (s *Service) CategorySuggestions(ctx context.Context, keyword, country stri
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", s.userAgents[int(time.Now().UnixNano())%len(s.userAgents)])
+	req.Header.Set("User-Agent", s.userAgent())
 	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
 
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case <-s.closed:
-		return nil, ErrServiceClosed
-	case <-s.ticker.C:
+	if err := s.waitForRate(ctx); err != nil {
+		return nil, err
 	}
 
 	resp, err := s.client.Do(req)
@@ -317,15 +334,11 @@ func (s *Service) BestsellerAnalysis(ctx context.Context, keyword, country strin
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", s.userAgents[int(time.Now().UnixNano())%len(s.userAgents)])
+	req.Header.Set("User-Agent", s.userAgent())
 	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
 
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case <-s.closed:
-		return nil, ErrServiceClosed
-	case <-s.ticker.C:
+	if err := s.waitForRate(ctx); err != nil {
+		return nil, err
 	}
 
 	resp, err := s.client.Do(req)
@@ -438,14 +451,18 @@ func (s *Service) GenerateAMSKeywords(ctx context.Context, title, description st
 		bag[token] += weight
 	}
 
-	for _, word := range strings.Fields(title) {
-		add(word, 3)
+	for _, part := range strings.FieldsFunc(title, func(r rune) bool {
+		return r == ' ' || r == '-' || r == ':' || r == ','
+	}) {
+		add(part, 3)
 	}
-	for _, word := range strings.Fields(description) {
-		add(word, 1)
+	for _, part := range strings.FieldsFunc(description, func(r rune) bool {
+		return r == ' ' || r == '-' || r == ':' || r == ',' || r == '\n'
+	}) {
+		add(part, 1)
 	}
-	for _, kw := range competitorKeywords {
-		add(kw, 5)
+	for _, competitor := range competitorKeywords {
+		add(competitor, 5)
 	}
 
 	type scoredKeyword struct {
