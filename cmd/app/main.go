@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"encoding/csv"
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -134,21 +136,24 @@ func buildKeywordResearchTab(service *scraper.Service, countries []string, keywo
 			if err != nil {
 				keywordOutput.Set(renderScrapeError(err))
 			} else {
-				keywordOutput.Set(formatKeywordInsights(keyword, suggestions))
+				formatted, _ := formatKeywordInsights(keyword, suggestions)
+				keywordOutput.Set(formatted)
 			}
 
 			categories, err := service.CategorySuggestions(ctx, keyword, country)
 			if err != nil {
 				categoryOutput.Set(renderScrapeError(err))
 			} else {
-				categoryOutput.Set(formatCategoryTrends(categories))
+				formatted, _ := formatCategoryTrends(categories)
+				categoryOutput.Set(formatted)
 			}
 
 			bestsellers, err := service.BestsellerAnalysis(ctx, keyword, country)
 			if err != nil {
 				bestsellerOutput.Set(renderScrapeError(err))
 			} else {
-				bestsellerOutput.Set(formatBestsellerProducts(bestsellers))
+				formatted, _ := formatBestsellerProducts(bestsellers)
+				bestsellerOutput.Set(formatted)
 			}
 		}()
 	})
@@ -205,7 +210,8 @@ func buildCompetitiveTab(service *scraper.Service, countries []string, reverseOu
 				reverseOutput.Set(renderScrapeError(err))
 				return
 			}
-			reverseOutput.Set(formatKeywordInsights(fmt.Sprintf("ASIN %s", asin), insights))
+			formatted, _ := formatKeywordInsights(fmt.Sprintf("ASIN %s", asin), insights)
+			reverseOutput.Set(formatted)
 		}()
 	})
 
@@ -222,7 +228,8 @@ func buildCompetitiveTab(service *scraper.Service, countries []string, reverseOu
 				return
 			}
 			flagged := scraper.FlagIllegalKeywords(keywords)
-			campaignOutput.Set(formatCampaignKeywords(keywords, flagged))
+			formatted, _ := formatCampaignKeywords(keywords, flagged)
+			campaignOutput.Set(formatted)
 		}()
 	})
 
@@ -278,7 +285,8 @@ func buildInternationalTab(service *scraper.Service, countries []string, output 
 				output.Set(renderScrapeError(err))
 				return
 			}
-			output.Set(formatInternationalKeywords(keywords))
+			formatted, _ := formatInternationalKeywords(keywords)
+			output.Set(formatted)
 		}()
 	})
 
@@ -328,9 +336,9 @@ Fetched: %s`,
 	)
 }
 
-func formatKeywordInsights(title string, insights []scraper.KeywordInsight) string {
+func formatKeywordInsights(title string, insights []scraper.KeywordInsight) (string, string) {
 	if len(insights) == 0 {
-		return fmt.Sprintf("No keyword suggestions available for %s", title)
+		return fmt.Sprintf("No keyword suggestions available for %s", title), ""
 	}
 
 	builder := strings.Builder{}
@@ -340,63 +348,153 @@ func formatKeywordInsights(title string, insights []scraper.KeywordInsight) stri
 	builder.WriteString("Keyword | Search Volume | Competition | Relevancy\n")
 	builder.WriteString(strings.Repeat("-", 60))
 	builder.WriteString("\n")
+
+	records := [][]string{{"Keyword", "Search Volume", "Competition", "Relevancy"}}
+
 	for _, insight := range insights {
 		builder.WriteString(fmt.Sprintf("%s | %d | %.2f | %.2f\n", insight.Keyword, insight.SearchVolume, insight.CompetitionScore, insight.RelevancyScore))
+		records = append(records, []string{
+			insight.Keyword,
+			strconv.Itoa(insight.SearchVolume),
+			fmt.Sprintf("%.2f", insight.CompetitionScore),
+			fmt.Sprintf("%.2f", insight.RelevancyScore),
+		})
 	}
-	return builder.String()
+
+	return builder.String(), csvFromRecords(records)
 }
 
-func formatCategoryTrends(trends []scraper.CategoryTrend) string {
+func formatCategoryTrends(trends []scraper.CategoryTrend) (string, string) {
 	builder := strings.Builder{}
 	builder.WriteString("Category Intelligence\n")
 	builder.WriteString(strings.Repeat("=", 40))
 	builder.WriteString("\n")
+
+	records := [][]string{{"Rank", "Category", "Momentum", "Notes"}}
+
 	for _, trend := range trends {
 		builder.WriteString(fmt.Sprintf("%d. %s (%s) - %s\n", trend.Rank, trend.Category, trend.Momentum, trend.Notes))
+		records = append(records, []string{
+			strconv.Itoa(trend.Rank),
+			trend.Category,
+			trend.Momentum,
+			trend.Notes,
+		})
 	}
-	return builder.String()
+
+	return builder.String(), csvFromRecords(records)
 }
 
-func formatBestsellerProducts(products []scraper.BestsellerProduct) string {
+func formatBestsellerProducts(products []scraper.BestsellerProduct) (string, string) {
 	builder := strings.Builder{}
 	builder.WriteString("Bestseller Snapshot\n")
 	builder.WriteString(strings.Repeat("=", 40))
 	builder.WriteString("\n")
+
+	records := [][]string{{"Rank", "Title", "ASIN", "Price", "Rating", "Reviews", "URL"}}
+
 	for _, product := range products {
 		builder.WriteString(fmt.Sprintf("#%d %s\n", product.Rank, product.Title))
 		builder.WriteString(fmt.Sprintf("ASIN: %s | Price: %s | Rating: %s | Reviews: %s\n", product.ASIN, product.Price, product.Rating, product.ReviewCount))
 		builder.WriteString(fmt.Sprintf("URL: %s\n\n", product.URL))
+		records = append(records, []string{
+			strconv.Itoa(product.Rank),
+			product.Title,
+			product.ASIN,
+			product.Price,
+			product.Rating,
+			product.ReviewCount,
+			product.URL,
+		})
 	}
-	return builder.String()
+
+	return builder.String(), csvFromRecords(records)
 }
 
-func formatCampaignKeywords(keywords, flagged []string) string {
+func formatCampaignKeywords(keywords, flagged []string) (string, string) {
 	if len(keywords) == 0 {
-		return "Unable to generate keyword suggestions. Provide more metadata."
+		return "Unable to generate keyword suggestions. Provide more metadata.", ""
 	}
+
 	builder := strings.Builder{}
 	builder.WriteString("Amazon Ads Keyword Portfolio\n")
 	builder.WriteString(strings.Repeat("=", 40))
 	builder.WriteString("\n")
+
+	records := [][]string{{"Index", "Keyword", "Flagged"}}
+
+	flaggedSet := make(map[string]struct{}, len(flagged))
+	for _, kw := range flagged {
+		trimmed := strings.TrimSpace(kw)
+		if trimmed != "" {
+			flaggedSet[trimmed] = struct{}{}
+		}
+	}
+
 	for i, keyword := range keywords {
 		builder.WriteString(fmt.Sprintf("%02d. %s\n", i+1, keyword))
+
+		flagValue := ""
+		if _, exists := flaggedSet[strings.TrimSpace(keyword)]; exists {
+			flagValue = "YES"
+		}
+
+		records = append(records, []string{
+			strconv.Itoa(i + 1),
+			keyword,
+			flagValue,
+		})
 	}
+
 	if len(flagged) > 0 {
 		builder.WriteString("\n⚠️ Compliance Alerts:\n")
 		for _, kw := range flagged {
 			builder.WriteString(fmt.Sprintf("- %s\n", kw))
 		}
 	}
-	return builder.String()
+
+	return builder.String(), csvFromRecords(records)
 }
 
-func formatInternationalKeywords(results []scraper.InternationalKeyword) string {
+func formatInternationalKeywords(results []scraper.InternationalKeyword) (string, string) {
 	builder := strings.Builder{}
 	builder.WriteString("International Keyword Radar\n")
 	builder.WriteString(strings.Repeat("=", 40))
 	builder.WriteString("\n")
+
+	records := [][]string{{"Country Code", "Country", "Keyword", "Search Volume"}}
+
 	for _, result := range results {
 		builder.WriteString(fmt.Sprintf("%s (%s): %s [Search Volume: %d]\n", result.CountryName, result.CountryCode, result.Keyword, result.SearchVolume))
+		records = append(records, []string{
+			result.CountryCode,
+			result.CountryName,
+			result.Keyword,
+			strconv.Itoa(result.SearchVolume),
+		})
 	}
+
+	return builder.String(), csvFromRecords(records)
+}
+
+func csvFromRecords(records [][]string) string {
+	if len(records) == 0 {
+		return ""
+	}
+
+	builder := &strings.Builder{}
+	writer := csv.NewWriter(builder)
+
+	for _, record := range records {
+		if err := writer.Write(record); err != nil {
+			return ""
+		}
+	}
+
+	writer.Flush()
+	if err := writer.Error(); err != nil {
+		return ""
+	}
+
 	return builder.String()
 }
