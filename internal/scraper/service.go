@@ -19,7 +19,7 @@ import (
 // Service encapsulates HTTP access and scraping helpers used by the application.
 type Service struct {
 	client      *http.Client
-	rateLimiter <-chan time.Time
+	rateLimiter *time.Ticker
 	userAgents  []string
 }
 
@@ -30,14 +30,22 @@ func NewService(timeout time.Duration, requestsPerMinute int) *Service {
 		requestsPerMinute = 20
 	}
 	interval := time.Minute / time.Duration(requestsPerMinute)
+	ticker := time.NewTicker(interval)
 	return &Service{
 		client:      &http.Client{Timeout: timeout},
-		rateLimiter: time.Tick(interval),
+		rateLimiter: ticker,
 		userAgents: []string{
 			"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
 			"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.3 Safari/605.1.15",
 			"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
 		},
+	}
+}
+
+// Close stops background resources associated with the service.
+func (s *Service) Close() {
+	if s.rateLimiter != nil {
+		s.rateLimiter.Stop()
 	}
 }
 
@@ -61,7 +69,7 @@ func (s *Service) FetchProduct(ctx context.Context, asin, country string) (*Prod
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	case <-s.rateLimiter:
+	case <-s.rateLimiter.C:
 	}
 
 	resp, err := s.client.Do(req)
@@ -135,7 +143,7 @@ func (s *Service) KeywordSuggestions(ctx context.Context, keyword, country strin
 	params.Set("page-type", "Search")
 	params.Set("client-info", "amazon-search-ui")
 	params.Set("limit", "15")
-	params.Set("mid", cfg.MarketplaceID)
+	params.Set("mid", cfg.MarketID)
 	params.Set("alias", "aps")
 	params.Set("suggestion-type", "KEYWORD")
 	params.Set("prefix", keyword)
@@ -152,7 +160,7 @@ func (s *Service) KeywordSuggestions(ctx context.Context, keyword, country strin
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	case <-s.rateLimiter:
+	case <-s.rateLimiter.C:
 	}
 
 	resp, err := s.client.Do(req)
@@ -219,7 +227,7 @@ func (s *Service) CategorySuggestions(ctx context.Context, keyword, country stri
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	case <-s.rateLimiter:
+	case <-s.rateLimiter.C:
 	}
 
 	resp, err := s.client.Do(req)
@@ -291,7 +299,7 @@ func (s *Service) BestsellerAnalysis(ctx context.Context, keyword, country strin
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	case <-s.rateLimiter:
+	case <-s.rateLimiter.C:
 	}
 
 	resp, err := s.client.Do(req)
