@@ -5,6 +5,7 @@ import (
 	"encoding/csv"
 	"errors"
 	"fmt"
+	"image/color"
 	"sort"
 	"strconv"
 	"strings"
@@ -23,9 +24,32 @@ import (
 	"github.com/umar/amazon-product-scraper/internal/scraper"
 )
 
+type highContrastTheme struct {
+	fyne.Theme
+}
+
+func newHighContrastTheme() fyne.Theme {
+	return &highContrastTheme{Theme: theme.LightTheme()}
+}
+
+func (t *highContrastTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVariant) color.Color {
+	if variant == theme.VariantLight {
+		switch name {
+		case theme.ColorNameDisabled:
+			return color.NRGBA{R: 0x44, G: 0x44, B: 0x44, A: 0xff}
+		case theme.ColorNameDisabledButton:
+			return color.NRGBA{R: 0xed, G: 0xed, B: 0xed, A: 0xff}
+		case theme.ColorNameInputBackground:
+			return color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff}
+		}
+	}
+
+	return t.Theme.Color(name, variant)
+}
+
 func main() {
 	application := app.NewWithID("amazon-product-scraper")
-	application.Settings().SetTheme(theme.LightTheme())
+	application.Settings().SetTheme(newHighContrastTheme())
 
 	service := scraper.NewService(25*time.Second, 25)
 	defer service.Close()
