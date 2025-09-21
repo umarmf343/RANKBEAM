@@ -34,6 +34,8 @@ This fork adds a cross-platform desktop experience named **Amazon Product Intell
 
 ### Quick start
 
+> **Important:** The desktop UI depends on the [Fyne](https://fyne.io) toolkit which currently ships Windows binaries for **64-bit** environments only. Make sure you have the 64-bit Go toolchain installed (the Go installer adds `go env GOARCH` = `amd64`) and, if you rely on MinGW, that it is the `x86_64` variant. Attempting to compile with a 32-bit toolchain will lead to linker errors such as `cannot find -lgdi32` / `-lopengl32` because those libraries are not available for 386 builds.
+
 ```bash
 # run the UI locally
 go run ./cmd/app
