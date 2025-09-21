@@ -4,7 +4,7 @@ This repository now contains a Go/Fyne desktop application that wraps the scrapi
 
 ## 1. Prerequisites
 
-- Go **1.21** or newer installed locally.
+- Go **1.21** or newer installed locally. Install the **64-bit** distribution so that `go env GOARCH` reports `amd64`; the GUI cannot be built with 32-bit toolchains.
 - The [Fyne prerequisites](https://docs.fyne.io/started/) for your target platform. For Windows cross-compilation from Linux you also need a MinGW toolchain (`x86_64-w64-mingw32-gcc`).
 - Git and make (optional but convenient).
 - Inno Setup 6 (for building the installer) if you are on Windows.
@@ -32,7 +32,7 @@ GOOS=windows GOARCH=amd64 go build -o amazon-product-scraper.exe ./cmd/app
 
 The `fyne package` command embeds the required resources and produces an `.exe` file plus metadata. If you only need the executable, the `go build` command is sufficient.
 
-> **Note:** Fyne requires a C compiler. When cross-compiling from Linux you may have to install `mingw-w64` and set `CC=x86_64-w64-mingw32-gcc` before building.
+> **Note:** Fyne requires a C compiler. When cross-compiling from Linux you may have to install `mingw-w64` and set `CC=x86_64-w64-mingw32-gcc` before building. If you are developing on Windows, make sure the MinGW/MSYS2 environment you point to is the 64-bit `x86_64` variant. A 32-bit environment will fail during linking with messages such as `cannot find -lgdi32` and `cannot find -lopengl32`.
 
 ## 5. Package with Inno Setup
 
