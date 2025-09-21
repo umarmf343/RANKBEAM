@@ -74,7 +74,7 @@ func buildProductLookupTab(win fyne.Window, service *scraper.Service, countries 
 	resultView.Wrapping = fyne.TextWrapWord
 	resultView.Bind(output)
 	resultView.SetMinRowsVisible(12)
-	resultView.Disable()
+	resultView.SetReadOnly(true)
 
 	fetchButton := widget.NewButton("Fetch Product", func() {
 		asin := strings.TrimSpace(asinEntry.Text)
@@ -116,12 +116,12 @@ func buildKeywordResearchTab(win fyne.Window, service *scraper.Service, countrie
 	keywordView := widget.NewMultiLineEntry()
 	keywordView.Wrapping = fyne.TextWrapWord
 	keywordView.Bind(keywordOutput)
-	keywordView.Disable()
+	keywordView.SetReadOnly(true)
 
 	categoryView := widget.NewMultiLineEntry()
 	categoryView.Wrapping = fyne.TextWrapWord
 	categoryView.Bind(categoryOutput)
-	categoryView.Disable()
+	categoryView.SetReadOnly(true)
 
 	bestsellerView := widget.NewMultiLineEntry()
 	keywordCSV := binding.NewString()
@@ -129,7 +129,7 @@ func buildKeywordResearchTab(win fyne.Window, service *scraper.Service, countrie
 	bestsellerCSV := binding.NewString()
 	bestsellerView.Wrapping = fyne.TextWrapWord
 	bestsellerView.Bind(bestsellerOutput)
-	bestsellerView.Disable()
+	bestsellerView.SetReadOnly(true)
 
 	keywordCSV.Set("")
 	categoryCSV.Set("")
@@ -227,7 +227,7 @@ func buildCompetitiveTab(win fyne.Window, service *scraper.Service, countries []
 	reverseView := widget.NewMultiLineEntry()
 	reverseView.Wrapping = fyne.TextWrapWord
 	reverseView.Bind(reverseOutput)
-	reverseView.Disable()
+	reverseView.SetReadOnly(true)
 
 	campaignView := widget.NewMultiLineEntry()
 	reverseCSV := binding.NewString()
@@ -236,7 +236,7 @@ func buildCompetitiveTab(win fyne.Window, service *scraper.Service, countries []
 	campaignCSV.Set("")
 	campaignView.Wrapping = fyne.TextWrapWord
 	campaignView.Bind(campaignOutput)
-	campaignView.Disable()
+	campaignView.SetReadOnly(true)
 
 	metricControls, metricPanel := newMetricFilterControls()
 
@@ -321,7 +321,7 @@ func buildInternationalTab(win fyne.Window, service *scraper.Service, countries 
 	outputView := widget.NewMultiLineEntry()
 	outputView.Wrapping = fyne.TextWrapWord
 	outputView.Bind(output)
-	outputView.Disable()
+	outputView.SetReadOnly(true)
 
 	csvBinding := binding.NewString()
 	csvBinding.Set("")
