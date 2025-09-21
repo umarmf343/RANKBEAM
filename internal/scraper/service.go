@@ -186,6 +186,13 @@ func (s *Service) FetchProduct(ctx context.Context, asin, country string) (*Prod
 	publisher := parsePublisher(doc)
 	ranks := parseBestSellerRanks(doc)
 	indie := isIndependentPublisher(publisher)
+	details := collectProductDetails(doc)
+	printLength := findProductDetail(details, "print length", "pages", "paperback", "hardcover")
+	dimensions := findProductDetail(details, "dimensions", "product dimensions", "item dimensions")
+	publicationDate := findProductDetail(details, "publication date", "publish date", "publication day")
+	language := findProductDetail(details, "language")
+	isbn10 := findProductDetail(details, "isbn-10", "isbn 10")
+	isbn13 := findProductDetail(details, "isbn-13", "isbn 13")
 
 	titleDensity := -1.0
 	if strings.TrimSpace(title) != "" {
@@ -209,6 +216,12 @@ func (s *Service) FetchProduct(ctx context.Context, asin, country string) (*Prod
 		ImageURL:        image,
 		DeliveryMessage: delivery,
 		Publisher:       publisher,
+		PrintLength:     printLength,
+		Dimensions:      dimensions,
+		PublicationDate: publicationDate,
+		Language:        language,
+		ISBN10:          isbn10,
+		ISBN13:          isbn13,
 		BestSellerRanks: ranks,
 		IsIndependent:   indie,
 		TitleDensity:    titleDensity,
@@ -924,6 +937,129 @@ func parseBestSellerRanks(doc *goquery.Document) []BestSellerRank {
 	}
 
 	return ranks
+}
+
+type productDetailEntry struct {
+	label string
+	lower string
+	value string
+}
+
+func collectProductDetails(doc *goquery.Document) []productDetailEntry {
+	entries := []productDetailEntry{}
+	if doc == nil {
+		return entries
+	}
+
+	addEntry := func(label, value string) {
+		label = normalizeDetailLabel(label)
+		value = normalizeDetailValue(value)
+		if label == "" || value == "" {
+			return
+		}
+		lower := strings.ToLower(label)
+		for _, entry := range entries {
+			if entry.lower == lower {
+				return
+			}
+		}
+		entries = append(entries, productDetailEntry{
+			label: label,
+			lower: lower,
+			value: value,
+		})
+	}
+
+	doc.Find("#detailBullets_feature_div li").Each(func(i int, selection *goquery.Selection) {
+		label := normalizeDetailLabel(selection.Find("span.a-text-bold").Text())
+		value := normalizeDetailValue(selection.Find("span").Last().Text())
+		if label == "" || value == "" {
+			text := normalizeDetailValue(selection.Text())
+			parts := strings.SplitN(text, ":", 2)
+			if len(parts) == 2 {
+				label = normalizeDetailLabel(parts[0])
+				value = normalizeDetailValue(parts[1])
+			}
+		}
+		addEntry(label, value)
+	})
+
+	doc.Find("#productDetailsTable tr").Each(func(i int, selection *goquery.Selection) {
+		label := normalizeDetailLabel(selection.Find("th").Text())
+		value := normalizeDetailValue(selection.Find("td").Text())
+		addEntry(label, value)
+	})
+
+	doc.Find("#productDetails_detailBullets_sections1 tr").Each(func(i int, selection *goquery.Selection) {
+		label := normalizeDetailLabel(selection.Find("th").Text())
+		value := normalizeDetailValue(selection.Find("td").Text())
+		addEntry(label, value)
+	})
+
+	return entries
+}
+
+func findProductDetail(entries []productDetailEntry, keywords ...string) string {
+	if len(entries) == 0 {
+		return ""
+	}
+	normalized := make([]string, 0, len(keywords))
+	for _, key := range keywords {
+		cleaned := strings.ToLower(strings.TrimSpace(key))
+		if cleaned != "" {
+			normalized = append(normalized, cleaned)
+		}
+	}
+	if len(normalized) == 0 {
+		return ""
+	}
+
+	for _, entry := range entries {
+		for _, key := range normalized {
+			if entry.lower == key {
+				return entry.value
+			}
+		}
+	}
+
+	for _, entry := range entries {
+		for _, key := range normalized {
+			if strings.Contains(entry.lower, key) {
+				return entry.value
+			}
+		}
+	}
+
+	for _, entry := range entries {
+		lowerValue := strings.ToLower(entry.value)
+		for _, key := range normalized {
+			if strings.Contains(lowerValue, key) {
+				return entry.value
+			}
+		}
+	}
+
+	return ""
+}
+
+func normalizeDetailLabel(label string) string {
+	label = normalizeDetailValue(label)
+	label = strings.TrimSuffix(label, ":")
+	label = strings.TrimSpace(label)
+	return label
+}
+
+func normalizeDetailValue(value string) string {
+	if value == "" {
+		return ""
+	}
+	replacer := strings.NewReplacer("\u200e", "", "\u200f", "", "\n", " ")
+	cleaned := replacer.Replace(value)
+	cleaned = strings.TrimSpace(cleaned)
+	if cleaned == "" {
+		return ""
+	}
+	return strings.Join(strings.Fields(cleaned), " ")
 }
 
 func isIndependentPublisher(publisher string) bool {

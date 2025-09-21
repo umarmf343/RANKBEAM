@@ -456,6 +456,36 @@ func formatProductDetails(product *scraper.ProductDetails) string {
 		builder.WriteString("Publisher: Not available\n")
 	}
 	fmt.Fprintf(builder, "Independent Publisher: %t\n", product.IsIndependent)
+	if strings.TrimSpace(product.PrintLength) != "" {
+		fmt.Fprintf(builder, "Print Length: %s\n", product.PrintLength)
+	} else {
+		builder.WriteString("Print Length: Not available\n")
+	}
+	if strings.TrimSpace(product.Dimensions) != "" {
+		fmt.Fprintf(builder, "Dimensions: %s\n", product.Dimensions)
+	} else {
+		builder.WriteString("Dimensions: Not available\n")
+	}
+	if strings.TrimSpace(product.PublicationDate) != "" {
+		fmt.Fprintf(builder, "Publication Date: %s\n", product.PublicationDate)
+	} else {
+		builder.WriteString("Publication Date: Not available\n")
+	}
+	if strings.TrimSpace(product.Language) != "" {
+		fmt.Fprintf(builder, "Language: %s\n", product.Language)
+	} else {
+		builder.WriteString("Language: Not available\n")
+	}
+	if strings.TrimSpace(product.ISBN10) != "" {
+		fmt.Fprintf(builder, "ISBN-10: %s\n", product.ISBN10)
+	} else {
+		builder.WriteString("ISBN-10: Not available\n")
+	}
+	if strings.TrimSpace(product.ISBN13) != "" {
+		fmt.Fprintf(builder, "ISBN-13: %s\n", product.ISBN13)
+	} else {
+		builder.WriteString("ISBN-13: Not available\n")
+	}
 	if len(product.BestSellerRanks) > 0 {
 		builder.WriteString("Best Seller Ranks:\n")
 		for _, rank := range product.BestSellerRanks {
@@ -484,6 +514,7 @@ func formatKeywordInsights(title string, insights []scraper.KeywordInsight, show
 	builder.WriteString(fmt.Sprintf("Keyword Research for %s\n", title))
 	builder.WriteString(strings.Repeat("=", 40))
 	builder.WriteString("\n")
+	builder.WriteString("Legend: 🟢 Strong | 🟡 Moderate | 🔴 Weak\n\n")
 
 	header := "Keyword | Search Volume | Competition | Relevancy"
 	if showDensity {
@@ -498,13 +529,17 @@ func formatKeywordInsights(title string, insights []scraper.KeywordInsight, show
 	}
 
 	for _, insight := range insights {
+		volumeSignal := searchVolumeSignal(insight.SearchVolume)
+		competitionSignal := competitionSignal(insight.CompetitionScore)
+		volumeDisplay := fmt.Sprintf("%d %s", insight.SearchVolume, volumeSignal.String())
+		competitionDisplay := fmt.Sprintf("%.2f %s", insight.CompetitionScore, competitionSignal.String())
 		row := []string{
 			insight.Keyword,
-			strconv.Itoa(insight.SearchVolume),
-			fmt.Sprintf("%.2f", insight.CompetitionScore),
+			volumeDisplay,
+			competitionDisplay,
 			fmt.Sprintf("%.2f", insight.RelevancyScore),
 		}
-		builder.WriteString(fmt.Sprintf("%s | %d | %.2f | %.2f", insight.Keyword, insight.SearchVolume, insight.CompetitionScore, insight.RelevancyScore))
+		builder.WriteString(strings.Join([]string{insight.Keyword, volumeDisplay, competitionDisplay, fmt.Sprintf("%.2f", insight.RelevancyScore)}, " | "))
 		if showDensity {
 			density := densityString(insight.TitleDensity)
 			builder.WriteString(fmt.Sprintf(" | %s", density))
@@ -841,4 +876,50 @@ func densityString(value float64) string {
 		return "N/A"
 	}
 	return fmt.Sprintf("%.2f", value)
+}
+
+type metricSignal struct {
+	emoji string
+	label string
+}
+
+func (m metricSignal) String() string {
+	emoji := strings.TrimSpace(m.emoji)
+	label := strings.TrimSpace(m.label)
+	switch {
+	case emoji != "" && label != "":
+		return fmt.Sprintf("%s %s", emoji, label)
+	case label != "":
+		return label
+	default:
+		return emoji
+	}
+}
+
+func searchVolumeSignal(volume int) metricSignal {
+	if volume <= 0 {
+		return metricSignal{label: "N/A"}
+	}
+	switch {
+	case volume >= 1500:
+		return metricSignal{emoji: "🟢", label: "High"}
+	case volume >= 600:
+		return metricSignal{emoji: "🟡", label: "Medium"}
+	default:
+		return metricSignal{emoji: "🔴", label: "Low"}
+	}
+}
+
+func competitionSignal(score float64) metricSignal {
+	if score < 0 {
+		return metricSignal{label: "N/A"}
+	}
+	switch {
+	case score <= 0.4:
+		return metricSignal{emoji: "🟢", label: "Low"}
+	case score <= 0.7:
+		return metricSignal{emoji: "🟡", label: "Moderate"}
+	default:
+		return metricSignal{emoji: "🔴", label: "High"}
+	}
 }

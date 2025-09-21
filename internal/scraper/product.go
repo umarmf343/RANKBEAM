@@ -15,6 +15,12 @@ type ProductDetails struct {
 	Brand           string
 	DeliveryMessage string
 	Publisher       string
+	PrintLength     string
+	Dimensions      string
+	PublicationDate string
+	Language        string
+	ISBN10          string
+	ISBN13          string
 	BestSellerRanks []BestSellerRank
 	IsIndependent   bool
 	TitleDensity    float64

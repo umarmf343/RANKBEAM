@@ -239,6 +239,23 @@ func synthesizeProductDetails(asin, country string) *ProductDetails {
 		Rank:     250 + int(stableFloat("rank-"+asin)*600),
 	}}
 
+	pages := 120 + int(stableFloat("pages-"+asin)*220)
+	if pages < 60 {
+		pages = 60
+	}
+	printLength := fmt.Sprintf("%d pages", pages)
+	width := 5.25 + stableFloat("width-"+asin)*1.75
+	height := 8.0 + stableFloat("height-"+asin)*1.5
+	depth := 0.25 + stableFloat("depth-"+asin)*0.6
+	dimensions := fmt.Sprintf("%.1f x %.1f x %.1f inches", width, height, depth)
+	published := now().AddDate(-1-int(stableFloat("pubyear-"+asin)*3), -int(stableFloat("pubmonth-"+asin)*10), 0)
+	publicationDate := published.Format("January 2006")
+	isbn := strings.ToUpper(asin)
+	if len(isbn) > 10 {
+		isbn = isbn[:10]
+	}
+	isbn13 := fmt.Sprintf("978-%s", isbn)
+
 	return &ProductDetails{
 		Title:           title,
 		ASIN:            strings.ToUpper(asin),
@@ -251,6 +268,12 @@ func synthesizeProductDetails(asin, country string) *ProductDetails {
 		Brand:           "Offline Insight",
 		DeliveryMessage: "Delivery estimate varies while offline",
 		Publisher:       "Independently published",
+		PrintLength:     printLength,
+		Dimensions:      dimensions,
+		PublicationDate: publicationDate,
+		Language:        "English",
+		ISBN10:          isbn,
+		ISBN13:          isbn13,
 		BestSellerRanks: ranks,
 		IsIndependent:   true,
 		TitleDensity:    density,
