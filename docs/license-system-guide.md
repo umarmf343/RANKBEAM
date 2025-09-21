@@ -1,37 +1,33 @@
-# License System Implementation Guide
+# Comprehensive License System Guide (Inno Setup + Go Server)
 
-This document describes how to extend the Amazon Product Intelligence Suite desktop application with a machine-bound license system. The solution is split into two cooperating parts:
+This guide walks you through replicating a "Publisher Rocket" style licensing flow for the Amazon Product Intelligence Suite. The solution has two cooperating halves:
 
-1. **Client-side installer enhancements** built with Inno Setup that generate a hardware fingerprint during installation, fetch the corresponding license key from a backend, and persist that key securely on the end-user's PC.
-2. **Server-side APIs** implemented in Go that mint, store, and validate license keys for every fingerprinted device.
+1. **Client-side installer automation** authored with **Inno Setup**. During setup it fingerprints the machine, calls your licensing API, returns a license key to the customer, and stores it for future validations.
+2. **Server-side APIs** written in **Go** that mint, store, and validate licenses that are bound to hardware fingerprints.
 
-> The walkthrough below is inspired by the licensing flow used by Publisher Rocket and is tailored to the stack that ships with this repository (Go/Fyne desktop client packaged for Windows by Inno Setup).
+The document is self-contained so that you can integrate licensing without needing additional references.
 
 ---
 
-## 1. Prerequisites
+## 0. Prerequisites
 
 | Area | Requirement |
 | --- | --- |
-| Installer authoring | [Inno Setup 6+](https://jrsoftware.org/isinfo.php) with the bundled ISTool/Inno Script Studio editor. |
-| Backend | Go 1.21+, `go install` permissions, and SQLite 3 libraries (or equivalent DB). |
-| Networking | Publicly reachable HTTPS endpoint for licensing APIs (self-hosted or cloud). |
-| Build artifacts | Compiled desktop binary (e.g. `amazon-product-scraper.exe`) produced via `GOOS=windows GOARCH=amd64 go build ./cmd/app`. |
-| Secure storage | Windows Credential Locker, DPAPI, or an application-specific encrypted file for persisting the returned license key. |
+| Installer tooling | [Inno Setup 6+](https://jrsoftware.org/isinfo.php) with the built-in script editor or Inno Script Studio. |
+| Desktop binary | Windows build of your Go/Fyne application (e.g. `GOOS=windows GOARCH=amd64 go build ./cmd/app`). |
+| Backend | Go 1.21+, SQLite 3 (or preferred DB), and ability to expose an HTTPS endpoint. |
+| Networking | Outbound HTTPS connectivity from installers and clients to your API domain. |
+| Security | Access to Windows Credential Locker or DPAPI if you plan to encrypt stored keys. |
 
 ---
 
-## 2. Installer Workflow (Inno Setup)
+## 1. Client Side – Inno Setup Integration
 
-During the final stages of the installer, run a custom code section to:
+The installer will: (a) collect a customer identifier, (b) derive a machine fingerprint, (c) request a license key from the API, (d) persist the key locally, and (e) surface the key to the user. All of this runs automatically as part of installation.
 
-1. Derive a machine fingerprint (CPU ID, BIOS serial, MAC address, or TPM UUID).
-2. POST the fingerprint to your licensing API to mint a license key.
-3. Display the key to the customer and store it locally for future validations.
+### 1.1 Installer Script Layout
 
-### 2.1. Base Script Skeleton
-
-Create a new script (or extend `installer/amazon-product-suite.iss`) with the following sections:
+Create `installer/amazon-product-suite.iss` (or adapt your existing script) with the following skeleton:
 
 ```pascal
 [Setup]
@@ -45,6 +41,7 @@ OutputBaseFilename=amazon-product-suite
 
 [Files]
 Source: "..\bin\amazon-product-scraper.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\bin\fingerprint-helper.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall
 
 [Run]
 Filename: "{app}\amazon-product-scraper.exe"; Parameters: "/licensekey={code:GetLicenseKey}"; Flags: runhidden
@@ -60,17 +57,27 @@ begin
   Fingerprint := GetMachineFingerprint();
   Response := RequestLicenseFromServer(Fingerprint);
   GeneratedKey := ParseLicenseKey(Response);
-  if GeneratedKey = '' then
-    MsgBox('Unable to obtain license key. Please contact support.', mbError, MB_OK)
-  else
+  if GeneratedKey = '' then begin
+    MsgBox('Unable to obtain license key. Please contact support.', mbError, MB_OK);
+    Result := '';
+  end else begin
     PersistLicenseKey(GeneratedKey);
-  Result := GeneratedKey;
+    ShowLicenseKey(GeneratedKey);
+    Result := GeneratedKey;
+  end;
 end;
 ```
 
-### 2.2. Hardware Fingerprinting
+Key setup pages to add:
 
-Use Windows Management Instrumentation (WMI) via `CreateOleObject('WbemScripting.SWbemLocator')` to gather unique identifiers. Combine multiple attributes to reduce collisions. Example helper:
+- **Customer information**: use the `UserInfo` support in Inno Setup or build a custom wizard page to collect name/email. Keep the entered value in a global variable so that `RequestLicenseFromServer` can include it.
+- **Firewall exception (optional)**: ensure the installer can make outbound HTTPS calls by asking Windows Firewall for temporary access if required.
+
+### 1.2 Machine Fingerprinting
+
+For predictability, ship a helper binary that calculates the fingerprint (e.g. a Go CLI that you also use inside the desktop app). You can still use WMI directly if you prefer PascalScript.
+
+#### Option A: WMI in PascalScript
 
 ```pascal
 function GetMachineFingerprint(): string;
@@ -97,24 +104,46 @@ begin
 end;
 ```
 
-> **Tip:** Ship a small helper executable (written in Go) that prints your canonical fingerprint to stdout, then call it via `Exec` to keep the script lean and to reuse logic inside the desktop app.
+#### Option B: Helper Executable
 
-### 2.3. HTTPS Requests from Inno Setup
+1. Build `fingerprint-helper.exe` from Go code that prints a fingerprint to stdout using identical logic to the desktop app.
+2. Run it from the installer:
 
-Leverage the built-in `THTTPSend` type (via InnoTools Downloader) or a lightweight helper executable to communicate with your API. The PascalScript snippet below uses WinHTTP:
+```pascal
+function GetMachineFingerprint(): string;
+var
+  ResultCode: Integer;
+  Output: AnsiString;
+begin
+  if not Exec(ExpandConstant('{tmp}') + '\\fingerprint-helper.exe', '', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+    raise Exception.Create('Fingerprint helper failed');
+  LoadStringFromFile(ExpandConstant('{tmp}') + '\\fingerprint.out', Output);
+  Result := Trim(Output);
+end;
+```
+
+Store the helper output in a temp file before deleting it in the `[Run]` cleanup step.
+
+### 1.3 Talking to the License API
+
+Use WinHTTP (built into Windows) to make HTTPS requests. If you need TLS 1.2+, explicitly set the option.
 
 ```pascal
 function RequestLicenseFromServer(const Fingerprint: string): string;
 var
   WinHttpReq: Variant;
   Url, Payload: string;
+  CustomerEmail: string;
 begin
+  CustomerEmail := WizardForm.UserInfoPage.Values[1]; // adapt to your data capture
   Url := 'https://licensing.yourdomain.com/api/v1/licenses';
-  Payload := '{"fingerprint":"' + Fingerprint + '"}';
+  Payload := '{"customerId":"' + CustomerEmail + '","fingerprint":"' + Fingerprint + '"}';
 
   WinHttpReq := CreateOleObject('WinHttp.WinHttpRequest.5.1');
   WinHttpReq.Open('POST', Url, False);
+  WinHttpReq.Option[9] := 128; // WINHTTP_OPTION_SECURE_PROTOCOLS -> TLS1.2
   WinHttpReq.SetRequestHeader('Content-Type', 'application/json');
+  WinHttpReq.SetRequestHeader('X-Installer-Token', '{#LicenseApiToken}');
   WinHttpReq.Send(Payload);
 
   if WinHttpReq.Status <> 201 then begin
@@ -127,7 +156,7 @@ begin
 end;
 ```
 
-### 2.4. Parsing and Persisting the Key
+### 1.4 Parsing and Persisting the Key
 
 ```pascal
 function ParseLicenseKey(const Response: string): string;
@@ -145,105 +174,96 @@ procedure PersistLicenseKey(const Key: string);
 var
   StoragePath: string;
 begin
-  StoragePath := ExpandConstant('{commonappdata}') + '\\AmazonProductSuite\\license.dat';
+  StoragePath := ExpandConstant('{localappdata}') + '\\AmazonProductSuite\\license.key';
   ForceDirectories(ExtractFilePath(StoragePath));
-  SaveStringToFile(StoragePath, Key, False);
+  if not SaveStringToFile(StoragePath, Key, False) then
+    Log('Failed to store license key at ' + StoragePath);
+end;
+
+procedure ShowLicenseKey(const Key: string);
+begin
+  MsgBox('Installation complete! Your license key is:\n\n' + Key + '\n\nIt has been saved automatically. Please store it for your records.',
+    mbInformation, MB_OK);
 end;
 ```
 
-Display the key using `MsgBox` after `GeneratedKey` is set, and remind users to store it safely. For high security, encrypt the file contents with Windows DPAPI or rely on the Go application to store it inside the Windows Credential Locker on first launch.
+### 1.5 Verifying on Application Launch
+
+- When the application starts, recompute the fingerprint using the same helper logic.
+- Load the cached license key from `license.key`.
+- Call `POST /api/v1/licenses/validate` (documented below) to confirm the key matches the fingerprint.
+- Cache the result for 12–24 hours to handle offline launches. When offline, fall back to the last successful validation timestamp.
 
 ---
 
-## 3. Server-Side API (Go)
+## 2. Server Side – License Generation API (Go)
 
-The server issues and validates license keys tied to machine fingerprints. A minimal but production-ready layout is:
+The API exposes two endpoints:
+
+1. `POST /api/v1/licenses` – create a license bound to a fingerprint.
+2. `POST /api/v1/licenses/validate` – confirm a license/fingerprint pair is valid.
+
+The sample implementation uses SQLite and the standard `net/http` package for readability. Adjust to match your infrastructure.
+
+### 2.1 Folder Structure
 
 ```
-cmd/
-  licensing-server/
-    main.go
-internal/
-  config/
-    config.go
-  http/
-    middleware.go
-    router.go
-  license/
-    generator.go
-    handler.go
-    repository.go
-  storage/
-    sqlite/
-      migrations.sql
-      repository.go
+Server/
+├── server.go             # Entrypoint with router setup
+├── db.go                 # Database connection helpers
+├── license-gen.go        # Key generation logic
+├── license-validation.go # HTTP handlers
+└── data/
+    └── licenses.db       # SQLite database (or use a managed DB)
 ```
 
-### 3.1. Database Layer
-
-Use SQLite for a lightweight deployment or swap in PostgreSQL/MySQL by replacing the driver. Example initialization (`internal/storage/sqlite/repository.go`):
+### 2.2 Database Helpers (`db.go`)
 
 ```go
-package sqlite
+package main
 
 import (
-    "context"
     "database/sql"
-    "embed"
-    "fmt"
+    "log"
 
     _ "github.com/mattn/go-sqlite3"
 )
 
-//go:embed migrations.sql
-var migrations embed.FS
-
-type Store struct {
-    db *sql.DB
-}
-
-func New(path string) (*Store, error) {
+func connectToDB(path string) *sql.DB {
     db, err := sql.Open("sqlite3", path)
     if err != nil {
-        return nil, fmt.Errorf("open db: %w", err)
+        log.Fatalf("open db: %v", err)
     }
-    if err := applyMigrations(db); err != nil {
-        return nil, err
+    if _, err := db.Exec(`
+        CREATE TABLE IF NOT EXISTS licenses (
+            key TEXT PRIMARY KEY,
+            fingerprint TEXT NOT NULL,
+            customer_id TEXT,
+            issued_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    `); err != nil {
+        log.Fatalf("create table: %v", err)
     }
-    return &Store{db: db}, nil
+    return db
 }
 
-func (s *Store) Close() error { return s.db.Close() }
-
-func (s *Store) InsertLicense(ctx context.Context, key, fingerprint, customerID string) error {
-    _, err := s.db.ExecContext(ctx, `INSERT INTO licenses (key, fingerprint, customer_id) VALUES (?, ?, ?)`, key, fingerprint, customerID)
-    return err
+func insertLicense(db *sql.DB, key, fingerprint, customerID string) {
+    if _, err := db.Exec(`INSERT INTO licenses(key, fingerprint, customer_id) VALUES (?, ?, ?)`, key, fingerprint, customerID); err != nil {
+        log.Fatalf("insert license: %v", err)
+    }
 }
 
-func (s *Store) LookupLicense(ctx context.Context, key string) (string, error) {
+func lookupLicense(db *sql.DB, key string) (string, error) {
     var fingerprint string
-    err := s.db.QueryRowContext(ctx, `SELECT fingerprint FROM licenses WHERE key = ?`, key).Scan(&fingerprint)
+    err := db.QueryRow(`SELECT fingerprint FROM licenses WHERE key = ?`, key).Scan(&fingerprint)
     return fingerprint, err
 }
 ```
 
-`migrations.sql` seeds the schema:
-
-```sql
-CREATE TABLE IF NOT EXISTS licenses (
-    key TEXT PRIMARY KEY,
-    fingerprint TEXT NOT NULL,
-    customer_id TEXT,
-    issued_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-```
-
-### 3.2. License Generation Logic
-
-`internal/license/generator.go`:
+### 2.3 License Generation (`license-gen.go`)
 
 ```go
-package license
+package main
 
 import (
     "crypto/rand"
@@ -254,50 +274,47 @@ import (
 
 const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
 
-func GenerateKey(customerID, fingerprint string) (string, error) {
-    raw := make([]byte, 16)
-    if _, err := rand.Read(raw); err != nil {
+func generateLicenseKey(customerID, fingerprint string) (string, error) {
+    buf := make([]byte, 16)
+    if _, err := rand.Read(buf); err != nil {
         return "", fmt.Errorf("read entropy: %w", err)
     }
 
-    payload := base32.NewEncoding(alphabet).WithPadding(base32.NoPadding).EncodeToString(raw)
+    payload := base32.NewEncoding(alphabet).WithPadding(base32.NoPadding).EncodeToString(buf)
     parts := []string{
-        strings.ToUpper(customerID),
-        fingerprint[:8],
+        strings.ToUpper(strings.ReplaceAll(customerID, " ", "")),
+        strings.ToUpper(fingerprint)[:8],
         payload[:5], payload[5:10], payload[10:15], payload[15:20],
     }
+
     return strings.Join(parts, "-"), nil
 }
 ```
 
-### 3.3. HTTP Handlers
-
-`internal/license/handler.go` wires the storage and generator together:
+### 2.4 HTTP Handlers (`license-validation.go`)
 
 ```go
-package license
+package main
 
 import (
     "crypto/subtle"
+    "database/sql"
     "encoding/json"
+    "log"
     "net/http"
-
-    "github.com/go-chi/chi/v5"
-    "github.com/yourorg/amazon-product-suite/internal/storage/sqlite"
 )
 
-type Handler struct {
-    store *sqlite.Store
+type LicenseServer struct {
+    db *sql.DB
+    installerToken string
 }
 
-func NewHandler(store *sqlite.Store) *Handler { return &Handler{store: store} }
+func (s *LicenseServer) generate(w http.ResponseWriter, r *http.Request) {
+    if r.Header.Get("X-Installer-Token") != s.installerToken {
+        http.Error(w, "unauthorized", http.StatusUnauthorized)
+        return
+    }
 
-func (h *Handler) Register(r chi.Router) {
-    r.Post("/licenses", h.generate)
-    r.Post("/licenses/validate", h.validate)
-}
-
-func (h *Handler) generate(w http.ResponseWriter, r *http.Request) {
     var req struct {
         CustomerID  string `json:"customerId"`
         Fingerprint string `json:"fingerprint"`
@@ -307,22 +324,20 @@ func (h *Handler) generate(w http.ResponseWriter, r *http.Request) {
         return
     }
 
-    key, err := GenerateKey(req.CustomerID, req.Fingerprint)
+    key, err := generateLicenseKey(req.CustomerID, req.Fingerprint)
     if err != nil {
         http.Error(w, "unable to create license", http.StatusInternalServerError)
         return
     }
 
-    if err := h.store.InsertLicense(r.Context(), key, req.Fingerprint, req.CustomerID); err != nil {
-        http.Error(w, "persist license", http.StatusInternalServerError)
-        return
-    }
+    insertLicense(s.db, key, req.Fingerprint, req.CustomerID)
 
+    w.Header().Set("Content-Type", "application/json")
     w.WriteHeader(http.StatusCreated)
     json.NewEncoder(w).Encode(map[string]string{"licenseKey": key})
 }
 
-func (h *Handler) validate(w http.ResponseWriter, r *http.Request) {
+func (s *LicenseServer) validate(w http.ResponseWriter, r *http.Request) {
     var req struct {
         LicenseKey  string `json:"licenseKey"`
         Fingerprint string `json:"fingerprint"`
@@ -332,7 +347,7 @@ func (h *Handler) validate(w http.ResponseWriter, r *http.Request) {
         return
     }
 
-    storedFingerprint, err := h.store.LookupLicense(r.Context(), req.LicenseKey)
+    storedFingerprint, err := lookupLicense(s.db, req.LicenseKey)
     if err != nil {
         http.Error(w, "license not found", http.StatusUnauthorized)
         return
@@ -347,44 +362,135 @@ func (h *Handler) validate(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
-Wrap the handlers in a small `main.go` that loads configuration, enables HTTPS-only traffic (use Caddy, nginx, or Let’s Encrypt), and installs middleware for logging, rate limiting, and API authentication (e.g., HMAC or JWT).
+### 2.5 Entrypoint (`server.go`)
 
-### 3.4. Deployment Checklist
+```go
+package main
 
-- **Environment variables**: `LICENSE_DB_PATH`, `LICENSE_API_KEY`, `LICENSE_ISSUER_DOMAIN`.
-- **Rate limiting**: Apply IP-based throttling (e.g., with [golang.org/x/time/rate](https://pkg.go.dev/golang.org/x/time/rate)).
-- **Observability**: Emit structured logs and metrics for license generation/validation volume.
-- **Backups**: Rotate encrypted database backups. SQLite can be replicated via `.backup` cron jobs.
+import (
+    "log"
+    "net/http"
+    "os"
+)
+
+func main() {
+    db := connectToDB("data/licenses.db")
+    defer db.Close()
+
+    server := &LicenseServer{
+        db:            db,
+        installerToken: os.Getenv("LICENSE_INSTALLER_TOKEN"),
+    }
+
+    mux := http.NewServeMux()
+    mux.HandleFunc("/api/v1/licenses", func(w http.ResponseWriter, r *http.Request) {
+        if r.Method != http.MethodPost {
+            http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+            return
+        }
+        server.generate(w, r)
+    })
+    mux.HandleFunc("/api/v1/licenses/validate", func(w http.ResponseWriter, r *http.Request) {
+        if r.Method != http.MethodPost {
+            http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+            return
+        }
+        server.validate(w, r)
+    })
+
+    addr := ":8443"
+    log.Printf("license server listening on %s", addr)
+
+    certFile := os.Getenv("LICENSE_TLS_CERT")
+    keyFile := os.Getenv("LICENSE_TLS_KEY")
+    if certFile != "" && keyFile != "" {
+        log.Fatal(http.ListenAndServeTLS(addr, certFile, keyFile, mux))
+    }
+
+    log.Fatal(http.ListenAndServe(addr, mux))
+}
+```
+
+> **Production tip:** place the server behind a reverse proxy (nginx, Caddy, AWS ALB) that terminates TLS and enforces rate limits. The built-in TLS option is fine for local testing.
+
+### 2.6 API Usage
+
+**Request license**
+
+```http
+POST /api/v1/licenses
+X-Installer-Token: <shared secret>
+Content-Type: application/json
+
+{
+  "customerId": "customer@example.com",
+  "fingerprint": "A1B2C3D4E5F6..."
+}
+```
+
+**Response**
+
+```json
+{
+  "licenseKey": "CUSTOMER-1A2B3C-ABCDE-FGHIJ-KLMNO-PQRST"
+}
+```
+
+**Validate license**
+
+```http
+POST /api/v1/licenses/validate
+Content-Type: application/json
+
+{
+  "licenseKey": "CUSTOMER-1A2B3C-ABCDE-FGHIJ-KLMNO-PQRST",
+  "fingerprint": "A1B2C3D4E5F6..."
+}
+```
+
+**Successful response**
+
+```json
+{"status":"valid"}
+```
+
+### 2.7 Operational Checklist
+
+- **Secrets**: store `LICENSE_INSTALLER_TOKEN`, TLS cert paths, and DB credentials in environment variables or a secrets manager.
+- **Rate limiting**: guard `/licenses` with IP-based throttling to block abuse (e.g., [golang.org/x/time/rate](https://pkg.go.dev/golang.org/x/time/rate)).
+- **Monitoring**: expose Prometheus metrics or log counts for license generation/validation.
+- **Backups**: snapshot the SQLite database or, for larger scale, migrate to PostgreSQL/MySQL with automated backups.
+- **Data privacy**: hash or encrypt stored fingerprints before persisting if you handle sensitive identifiers.
 
 ---
 
-## 4. Client Runtime Validation Flow
+## 3. Runtime License Checks in the Desktop App
 
-1. On each application launch, calculate the local machine fingerprint using the same algorithm as the installer (reuse the helper executable or shared Go package).
-2. Load the stored license key from disk/Credential Locker.
-3. Call `POST https://licensing.yourdomain.com/api/v1/licenses/validate` with `{"licenseKey": "...", "fingerprint": "..."}`.
-4. Deny access if the server returns `401` or the status differs from `valid`. Cache successful validations for a short period (e.g., 24 hours) to tolerate transient network outages.
-5. Offer a "Transfer license" flow that revokes the previous fingerprint via a support endpoint if the user upgrades hardware.
-
----
-
-## 5. Security Best Practices
-
-- **HTTPS everywhere**: Terminate TLS at your load balancer or reverse proxy. Reject plain HTTP requests in the handler.
-- **API Authentication**: Require an installer API key or signed JWT when minting licenses to prevent abuse.
-- **Least privilege**: Run the license server with a dedicated service account and minimal filesystem permissions.
-- **Anti-tampering**: Obfuscate the desktop binary and verify the integrity of the stored license key using an HMAC that the server can check.
-- **Monitoring**: Alert on repeated failed validation attempts or spikes in license issuance.
-- **Data privacy**: Hash fingerprints before storing to protect user hardware identifiers.
+1. **Startup**: compute the same fingerprint used by the installer.
+2. **Load**: read the cached license key from `%LOCALAPPDATA%\AmazonProductSuite\license.key` (or Credential Locker).
+3. **Validate**: call the `/validate` endpoint. If successful, cache the timestamp; if not, show a blocking dialog.
+4. **Offline grace**: allow a small grace period (e.g., 3 launches within 48 hours) when the last validation was successful.
+5. **Transfer flow**: provide a support channel or self-service portal to revoke an old fingerprint and issue a replacement key when a user upgrades hardware.
 
 ---
 
-## 6. Putting It All Together
+## 4. Security & Hardening Checklist
 
-1. **Build** the Go/Fyne application for Windows (`GOOS=windows GOARCH=amd64`).
-2. **Launch** the licensing API server (Docker container or systemd service) with HTTPS enabled.
-3. **Compile** the Inno Setup installer with the custom code that fingerprints hardware, requests a key, stores it, and displays it to the user.
-4. **Distribute** the installer. Upon installation, each machine receives a unique license key tied to its fingerprint.
-5. **Validate** the license on every app startup and surface clear messaging for invalid or expired keys.
+- **HTTPS everywhere**: require TLS for all installer and runtime calls. Reject plain HTTP at the server.
+- **API authentication**: the installer uses an `X-Installer-Token`; runtime validations can additionally use HMAC signatures or OAuth tokens.
+- **Code integrity**: sign the installer with Authenticode, and consider binary obfuscation to slow down reverse engineering.
+- **Tamper resistance**: store an HMAC alongside `license.key` so that any edits can be detected before contacting the server.
+- **Auditing**: log every license issuance and validation with request metadata. Alert on spikes or repeated failures.
+- **Privacy**: avoid storing raw hardware identifiers—hash them (e.g., SHA-256) before persistence.
 
-By following this guide, you can control installations on a per-device basis while providing a professional onboarding flow that mirrors Publisher Rocket's licensing experience.
+---
+
+## 5. End-to-End Workflow Recap
+
+1. **Build** the desktop executable and fingerprint helper.
+2. **Deploy** the Go license server with HTTPS, database, rate limiting, and monitoring in place.
+3. **Compile** the Inno Setup installer containing the helper and custom script.
+4. **Distribute** the installer. On each installation the server issues a unique key tied to the machine fingerprint and customer ID.
+5. **Verify** the license on every launch, granting access only when the fingerprint and key remain valid.
+
+This architecture enforces one-license-per-machine while delivering a polished onboarding flow comparable to Publisher Rocket.
