@@ -106,8 +106,13 @@ end;
 
 #### Option B: Helper Executable
 
-1. Build `fingerprint-helper.exe` from Go code that prints a fingerprint to stdout using identical logic to the desktop app.
-2. Run it from the installer:
+1. Build `fingerprint-helper.exe` from the repository's helper command so it mirrors the desktop app's fingerprint logic:
+
+   ```bash
+   GOOS=windows GOARCH=amd64 go build -o bin/fingerprint-helper.exe ./cmd/fingerprint-helper
+   ```
+
+2. Run it from the installer and capture the generated fingerprint into a temporary file:
 
 ```pascal
 function GetMachineFingerprint(): string;
@@ -115,14 +120,14 @@ var
   ResultCode: Integer;
   Output: AnsiString;
 begin
-  if not Exec(ExpandConstant('{tmp}') + '\\fingerprint-helper.exe', '', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+  if not Exec(ExpandConstant('{tmp}') + '\\fingerprint-helper.exe', '--output "' + ExpandConstant('{tmp}') + '\\fingerprint.out"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
     raise Exception.Create('Fingerprint helper failed');
   LoadStringFromFile(ExpandConstant('{tmp}') + '\\fingerprint.out', Output);
   Result := Trim(Output);
 end;
 ```
 
-Store the helper output in a temp file before deleting it in the `[Run]` cleanup step.
+The helper also prints the fingerprint to stdout, so you can debug by running it manually without the `--output` parameter. Store the helper output in a temp file before deleting it in the `[Run]` cleanup step.
 
 ### 1.3 Talking to the License API
 
@@ -205,213 +210,120 @@ The API exposes two endpoints:
 
 The sample implementation uses SQLite and the standard `net/http` package for readability. Adjust to match your infrastructure.
 
-### 2.1 Folder Structure
+### 2.1 Repository Layout
+
+This repository now ships a working reference implementation in [`server/`](../server/):
 
 ```
-Server/
-├── server.go             # Entrypoint with router setup
-├── db.go                 # Database connection helpers
-├── license-gen.go        # Key generation logic
-├── license-validation.go # HTTP handlers
-└── data/
-    └── licenses.db       # SQLite database (or use a managed DB)
+server/
+├── server.go              # HTTP bootstrap, logging middleware, graceful shutdown
+├── db.go                  # SQLite-backed LicenseStore with create/validate helpers
+├── license_gen.go         # Fingerprint hashing + license key formatting
+├── license_handler.go     # `POST /api/v1/licenses` and `/api/v1/licenses/validate`
+├── license_*_test.go      # Unit tests covering the store, handlers, and key generator
+└── db_test.go             # Exercices create/validate lifecycle against a temp SQLite file
 ```
 
-### 2.2 Database Helpers (`db.go`)
+### 2.2 Database Helpers (`server/db.go`)
+
+`LicenseStore` wraps a SQLite database (powered by [`modernc.org/sqlite`](https://pkg.go.dev/modernc.org/sqlite)) and enforces one license per fingerprint. Fingerprints are SHA-256 hashed before persistence so the raw hardware identifiers never leave the installer.
 
 ```go
-package main
-
-import (
-    "database/sql"
-    "log"
-
-    _ "github.com/mattn/go-sqlite3"
-)
-
-func connectToDB(path string) *sql.DB {
-    db, err := sql.Open("sqlite3", path)
-    if err != nil {
-        log.Fatalf("open db: %v", err)
-    }
-    if _, err := db.Exec(`
-        CREATE TABLE IF NOT EXISTS licenses (
-            key TEXT PRIMARY KEY,
-            fingerprint TEXT NOT NULL,
-            customer_id TEXT,
-            issued_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-    `); err != nil {
-        log.Fatalf("create table: %v", err)
-    }
-    return db
+type License struct {
+        Key             string
+        FingerprintHash string
+        CustomerID      string
+        CreatedAt       time.Time
 }
 
-func insertLicense(db *sql.DB, key, fingerprint, customerID string) {
-    if _, err := db.Exec(`INSERT INTO licenses(key, fingerprint, customer_id) VALUES (?, ?, ?)`, key, fingerprint, customerID); err != nil {
-        log.Fatalf("insert license: %v", err)
-    }
-}
-
-func lookupLicense(db *sql.DB, key string) (string, error) {
-    var fingerprint string
-    err := db.QueryRow(`SELECT fingerprint FROM licenses WHERE key = ?`, key).Scan(&fingerprint)
-    return fingerprint, err
-}
-```
-
-### 2.3 License Generation (`license-gen.go`)
-
-```go
-package main
-
-import (
-    "crypto/rand"
-    "encoding/base32"
-    "fmt"
-    "strings"
-)
-
-const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
-
-func generateLicenseKey(customerID, fingerprint string) (string, error) {
-    buf := make([]byte, 16)
-    if _, err := rand.Read(buf); err != nil {
-        return "", fmt.Errorf("read entropy: %w", err)
-    }
-
-    payload := base32.NewEncoding(alphabet).WithPadding(base32.NoPadding).EncodeToString(buf)
-    parts := []string{
-        strings.ToUpper(strings.ReplaceAll(customerID, " ", "")),
-        strings.ToUpper(fingerprint)[:8],
-        payload[:5], payload[5:10], payload[10:15], payload[15:20],
-    }
-
-    return strings.Join(parts, "-"), nil
-}
-```
-
-### 2.4 HTTP Handlers (`license-validation.go`)
-
-```go
-package main
-
-import (
-    "crypto/subtle"
-    "database/sql"
-    "encoding/json"
-    "log"
-    "net/http"
-)
-
-type LicenseServer struct {
-    db *sql.DB
-    installerToken string
-}
-
-func (s *LicenseServer) generate(w http.ResponseWriter, r *http.Request) {
-    if r.Header.Get("X-Installer-Token") != s.installerToken {
-        http.Error(w, "unauthorized", http.StatusUnauthorized)
-        return
-    }
-
-    var req struct {
-        CustomerID  string `json:"customerId"`
-        Fingerprint string `json:"fingerprint"`
-    }
-    if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-        http.Error(w, "invalid payload", http.StatusBadRequest)
-        return
-    }
-
-    key, err := generateLicenseKey(req.CustomerID, req.Fingerprint)
-    if err != nil {
-        http.Error(w, "unable to create license", http.StatusInternalServerError)
-        return
-    }
-
-    insertLicense(s.db, key, req.Fingerprint, req.CustomerID)
-
-    w.Header().Set("Content-Type", "application/json")
-    w.WriteHeader(http.StatusCreated)
-    json.NewEncoder(w).Encode(map[string]string{"licenseKey": key})
-}
-
-func (s *LicenseServer) validate(w http.ResponseWriter, r *http.Request) {
-    var req struct {
-        LicenseKey  string `json:"licenseKey"`
-        Fingerprint string `json:"fingerprint"`
-    }
-    if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-        http.Error(w, "invalid payload", http.StatusBadRequest)
-        return
-    }
-
-    storedFingerprint, err := lookupLicense(s.db, req.LicenseKey)
-    if err != nil {
-        http.Error(w, "license not found", http.StatusUnauthorized)
-        return
-    }
-
-    if subtle.ConstantTimeCompare([]byte(storedFingerprint), []byte(req.Fingerprint)) != 1 {
-        http.Error(w, "fingerprint mismatch", http.StatusUnauthorized)
-        return
-    }
-
-    json.NewEncoder(w).Encode(map[string]string{"status": "valid"})
-}
-```
-
-### 2.5 Entrypoint (`server.go`)
-
-```go
-package main
-
-import (
-    "log"
-    "net/http"
-    "os"
-)
-
-func main() {
-    db := connectToDB("data/licenses.db")
-    defer db.Close()
-
-    server := &LicenseServer{
-        db:            db,
-        installerToken: os.Getenv("LICENSE_INSTALLER_TOKEN"),
-    }
-
-    mux := http.NewServeMux()
-    mux.HandleFunc("/api/v1/licenses", func(w http.ResponseWriter, r *http.Request) {
-        if r.Method != http.MethodPost {
-            http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-            return
+func (s *LicenseStore) CreateLicense(ctx context.Context, customerID, fingerprintHash string) (*License, bool, error) {
+        if existing, err := s.FindByFingerprint(ctx, fingerprintHash); err == nil {
+                return existing, false, nil
         }
-        server.generate(w, r)
-    })
-    mux.HandleFunc("/api/v1/licenses/validate", func(w http.ResponseWriter, r *http.Request) {
-        if r.Method != http.MethodPost {
-            http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-            return
+        key, err := GenerateLicenseKey(customerID, fingerprintHash)
+        if err != nil {
+                return nil, false, err
         }
-        server.validate(w, r)
-    })
+        // ...insert row, handling concurrent upserts...
+        return &License{Key: key, FingerprintHash: fingerprintHash, CustomerID: customerID, CreatedAt: now}, true, nil
+}
 
-    addr := ":8443"
-    log.Printf("license server listening on %s", addr)
-
-    certFile := os.Getenv("LICENSE_TLS_CERT")
-    keyFile := os.Getenv("LICENSE_TLS_KEY")
-    if certFile != "" && keyFile != "" {
-        log.Fatal(http.ListenAndServeTLS(addr, certFile, keyFile, mux))
-    }
-
-    log.Fatal(http.ListenAndServe(addr, mux))
+func (s *LicenseStore) ValidateLicense(ctx context.Context, key, fingerprintHash string) (*License, error) {
+        lic, err := s.FindByKey(ctx, key)
+        if err != nil {
+                return nil, err
+        }
+        if lic.FingerprintHash != fingerprintHash {
+                return nil, ErrFingerprintMismatch
+        }
+        return lic, nil
 }
 ```
 
-> **Production tip:** place the server behind a reverse proxy (nginx, Caddy, AWS ALB) that terminates TLS and enforces rate limits. The built-in TLS option is fine for local testing.
+The store helper automatically creates the `licenses` table (`key` primary key, `fingerprint_hash` unique, timestamps) on startup.
+
+### 2.3 Key Generation (`server/license_gen.go`)
+
+`GenerateLicenseKey` normalises the customer identifier, samples two random base32 segments, and mixes in the first 12 characters of the fingerprint hash to produce keys such as `ACMECO-1A2B-3C4D-XYZ12-AB789`.
+
+```go
+func HashFingerprint(raw string) string {
+        sum := sha256.Sum256([]byte(strings.TrimSpace(raw)))
+        return strings.ToUpper(hex.EncodeToString(sum[:]))
+}
+
+func GenerateLicenseKey(customerID, fingerprintHash string) (string, error) {
+        sanitized := sanitizeCustomerID(customerID)
+        rand1, _ := randomSegment(5)
+        rand2, _ := randomSegment(5)
+        return fmt.Sprintf("%s-%s-%s-%s-%s-%s", sanitized, fingerprintHash[0:4], fingerprintHash[4:8], fingerprintHash[8:12], rand1, rand2), nil
+}
+```
+
+### 2.4 HTTP Handlers (`server/license_handler.go`)
+
+Both endpoints share an optional `X-Installer-Token` header check. When the token is configured (via environment variable or CLI flag) requests without the matching secret receive `403 Forbidden`.
+
+```go
+func (h *LicenseHandler) CreateLicense(w http.ResponseWriter, r *http.Request) {
+        if !h.authorize(w, r) {
+                return
+        }
+        var payload struct {
+                CustomerID  string `json:"customerId"`
+                Fingerprint string `json:"fingerprint"`
+        }
+        // decode + validate JSON, hash fingerprint, then call store.CreateLicense
+        license, created, err := h.store.CreateLicense(r.Context(), sanitizeCustomerID(payload.CustomerID), HashFingerprint(payload.Fingerprint))
+        // respond with 201 for new licenses or 200 when the fingerprint already owns a key
+}
+
+func (h *LicenseHandler) ValidateLicense(w http.ResponseWriter, r *http.Request) {
+        if !h.authorize(w, r) {
+                return
+        }
+        // decode JSON, hash fingerprint, call store.ValidateLicense
+        // respond with {"status":"valid"} or 401 on mismatch/not-found
+}
+```
+
+### 2.5 Server Entrypoint (`server/server.go`)
+
+`server.go` wires everything together, exposes `/healthz`, logs requests, and honours three environment variables (also configurable via flags):
+
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| `LICENSE_BIND_ADDR` | HTTP listen address | `:8080` |
+| `LICENSE_DB_PATH` | SQLite database path | `data/licenses.db` |
+| `LICENSE_API_TOKEN` | Shared secret for installer/app requests | unset (token disabled) |
+
+Run the API locally with:
+
+```bash
+go run ./server -token your-shared-secret
+```
+
+The bundled tests (`go test ./server/...`) cover create/validate flows, handler token enforcement, and key formatting.
 
 ### 2.6 API Usage
 
@@ -456,7 +368,7 @@ Content-Type: application/json
 
 ### 2.7 Operational Checklist
 
-- **Secrets**: store `LICENSE_INSTALLER_TOKEN`, TLS cert paths, and DB credentials in environment variables or a secrets manager.
+- **Secrets**: store `LICENSE_API_TOKEN`, TLS cert paths, and DB credentials in environment variables or a secrets manager.
 - **Rate limiting**: guard `/licenses` with IP-based throttling to block abuse (e.g., [golang.org/x/time/rate](https://pkg.go.dev/golang.org/x/time/rate)).
 - **Monitoring**: expose Prometheus metrics or log counts for license generation/validation.
 - **Backups**: snapshot the SQLite database or, for larger scale, migrate to PostgreSQL/MySQL with automated backups.
@@ -471,6 +383,8 @@ Content-Type: application/json
 3. **Validate**: call the `/validate` endpoint. If successful, cache the timestamp; if not, show a blocking dialog.
 4. **Offline grace**: allow a small grace period (e.g., 3 launches within 48 hours) when the last validation was successful.
 5. **Transfer flow**: provide a support channel or self-service portal to revoke an old fingerprint and issue a replacement key when a user upgrades hardware.
+
+> **Desktop configuration:** The Fyne UI integrates `internal/license` to read `%LOCALAPPDATA%\AmazonProductSuite\license.key`, compute the local fingerprint, and call the validation endpoint on every launch. Set `LICENSE_API_URL` (e.g., `https://licensing.yourdomain.com`) and `LICENSE_API_TOKEN` before starting the app so it can reach your server. Missing variables or validation failures surface a blocking dialog that explains how to recover.
 
 ---
 
