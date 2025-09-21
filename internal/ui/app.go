@@ -74,7 +74,7 @@ func buildProductLookupTab(win fyne.Window, service *scraper.Service, countries 
 	resultView.Wrapping = fyne.TextWrapWord
 	resultView.Bind(output)
 	resultView.SetMinRowsVisible(12)
-	resultView.SetReadOnly(true)
+	makeEntryReadOnly(resultView)
 
 	fetchButton := widget.NewButton("Fetch Product", func() {
 		asin := strings.TrimSpace(asinEntry.Text)
@@ -116,12 +116,12 @@ func buildKeywordResearchTab(win fyne.Window, service *scraper.Service, countrie
 	keywordView := widget.NewMultiLineEntry()
 	keywordView.Wrapping = fyne.TextWrapWord
 	keywordView.Bind(keywordOutput)
-	keywordView.SetReadOnly(true)
+	makeEntryReadOnly(keywordView)
 
 	categoryView := widget.NewMultiLineEntry()
 	categoryView.Wrapping = fyne.TextWrapWord
 	categoryView.Bind(categoryOutput)
-	categoryView.SetReadOnly(true)
+	makeEntryReadOnly(categoryView)
 
 	bestsellerView := widget.NewMultiLineEntry()
 	keywordCSV := binding.NewString()
@@ -129,7 +129,7 @@ func buildKeywordResearchTab(win fyne.Window, service *scraper.Service, countrie
 	bestsellerCSV := binding.NewString()
 	bestsellerView.Wrapping = fyne.TextWrapWord
 	bestsellerView.Bind(bestsellerOutput)
-	bestsellerView.SetReadOnly(true)
+	makeEntryReadOnly(bestsellerView)
 
 	keywordCSV.Set("")
 	categoryCSV.Set("")
@@ -227,7 +227,7 @@ func buildCompetitiveTab(win fyne.Window, service *scraper.Service, countries []
 	reverseView := widget.NewMultiLineEntry()
 	reverseView.Wrapping = fyne.TextWrapWord
 	reverseView.Bind(reverseOutput)
-	reverseView.SetReadOnly(true)
+	makeEntryReadOnly(reverseView)
 
 	campaignView := widget.NewMultiLineEntry()
 	reverseCSV := binding.NewString()
@@ -236,7 +236,7 @@ func buildCompetitiveTab(win fyne.Window, service *scraper.Service, countries []
 	campaignCSV.Set("")
 	campaignView.Wrapping = fyne.TextWrapWord
 	campaignView.Bind(campaignOutput)
-	campaignView.SetReadOnly(true)
+	makeEntryReadOnly(campaignView)
 
 	metricControls, metricPanel := newMetricFilterControls()
 
@@ -321,7 +321,7 @@ func buildInternationalTab(win fyne.Window, service *scraper.Service, countries 
 	outputView := widget.NewMultiLineEntry()
 	outputView.Wrapping = fyne.TextWrapWord
 	outputView.Bind(output)
-	outputView.SetReadOnly(true)
+	makeEntryReadOnly(outputView)
 
 	csvBinding := binding.NewString()
 	csvBinding.Set("")
@@ -369,6 +369,14 @@ func newResultPanel(title string, view *widget.Entry, textData binding.String, c
 	}
 
 	return container.NewBorder(label, container.NewHBox(actions...), nil, nil, view)
+}
+
+// makeEntryReadOnly prevents the user from editing result fields while still
+// allowing programmatic updates through data bindings. Older versions of Fyne
+// do not expose a SetReadOnly API, so we disable the entry to achieve the same
+// effect.
+func makeEntryReadOnly(entry *widget.Entry) {
+	entry.Disable()
 }
 
 func newCopyButton(win fyne.Window, data binding.String) *widget.Button {
