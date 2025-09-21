@@ -46,6 +46,8 @@ GOOS=windows GOARCH=amd64 go build -o amazon-product-scraper.exe ./cmd/app
 
 More detailed packaging instructions (including the Inno Setup installer) are available in [`docs/BUILD_WINDOWS.md`](docs/BUILD_WINDOWS.md).
 
+Looking to ship the desktop app with a per-machine license flow? Follow the step-by-step instructions in [`docs/license-system-guide.md`](docs/license-system-guide.md).
+
 **Product List**
 ![alt text](https://i.imgur.com/ES5M4Rx.png)
 **Review List**
