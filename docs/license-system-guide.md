@@ -112,18 +112,27 @@ end;
    GOOS=windows GOARCH=amd64 go build -o bin/fingerprint-helper.exe ./cmd/fingerprint-helper
    ```
 
-2. Run it from the installer and capture the generated fingerprint into a temporary file:
+2. Run it from the installer and capture the generated fingerprint into a temporary file via the helper's `--output` flag so the PascalScript snippet can read it back:
 
 ```pascal
 function GetMachineFingerprint(): string;
 var
   ResultCode: Integer;
+  OutputPath: string;
   Output: AnsiString;
 begin
-  if not Exec(ExpandConstant('{tmp}') + '\\fingerprint-helper.exe', '--output "' + ExpandConstant('{tmp}') + '\\fingerprint.out"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
-    raise Exception.Create('Fingerprint helper failed');
-  LoadStringFromFile(ExpandConstant('{tmp}') + '\\fingerprint.out', Output);
+  OutputPath := ExpandConstant('{tmp}') + '\\fingerprint.out';
+  if FileExists(OutputPath) then
+    DeleteFile(OutputPath);
+  if not Exec(ExpandConstant('{tmp}') + '\\fingerprint-helper.exe', '--output ' + AddQuotes(OutputPath), '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+    raise Exception.Create('Fingerprint helper failed to start');
+  if ResultCode <> 0 then
+    raise Exception.Create('Fingerprint helper exited with code ' + IntToStr(ResultCode));
+  if not LoadStringFromFile(OutputPath, Output) then
+    raise Exception.Create('Unable to read fingerprint output');
   Result := Trim(Output);
+  if Result = '' then
+    raise Exception.Create('Fingerprint helper returned an empty fingerprint');
 end;
 ```
 
@@ -146,7 +155,7 @@ begin
 
   WinHttpReq := CreateOleObject('WinHttp.WinHttpRequest.5.1');
   WinHttpReq.Open('POST', Url, False);
-  WinHttpReq.Option[9] := 128; // WINHTTP_OPTION_SECURE_PROTOCOLS -> TLS1.2
+  WinHttpReq.Option[9] := 2048; // WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_2
   WinHttpReq.SetRequestHeader('Content-Type', 'application/json');
   WinHttpReq.SetRequestHeader('X-Installer-Token', '{#LicenseApiToken}');
   WinHttpReq.Send(Payload);
