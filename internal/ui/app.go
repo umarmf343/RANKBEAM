@@ -79,7 +79,14 @@ func buildProductLookupTab(win fyne.Window, service *scraper.Service, countries 
 	fetchButton := widget.NewButton("Fetch Product", func() {
 		asin := strings.TrimSpace(asinEntry.Text)
 		country := countrySelect.Selected
+		displayASIN := asin
+		if displayASIN == "" {
+			displayASIN = "selected ASIN"
+		}
+		loadingMessage := fmt.Sprintf("Fetching product %s from %s...", displayASIN, country)
+		dismiss := showLoading(win, loadingMessage)
 		go func() {
+			defer dismiss()
 			output.Set(fmt.Sprintf("Fetching product %s from %s...", asin, country))
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
@@ -145,7 +152,14 @@ func buildKeywordResearchTab(win fyne.Window, service *scraper.Service, countrie
 		showDensity := metricControls.showDensity()
 		bestsellerFilter := bestsellerControls.filter()
 		showBSR := bestsellerControls.showBSR()
+		displayKeyword := keyword
+		if displayKeyword == "" {
+			displayKeyword = "your keyword"
+		}
+		loadingMessage := fmt.Sprintf("Collecting keyword intelligence for %s...", displayKeyword)
+		dismiss := showLoading(win, loadingMessage)
 		go func() {
+			defer dismiss()
 			keywordOutput.Set(fmt.Sprintf("Fetching keyword suggestions for %s...", keyword))
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
@@ -245,7 +259,14 @@ func buildCompetitiveTab(win fyne.Window, service *scraper.Service, countries []
 		country := countrySelect.Selected
 		filters := metricControls.keywordFilter()
 		showDensity := metricControls.showDensity()
+		displayASIN := asin
+		if displayASIN == "" {
+			displayASIN = "the provided ASIN"
+		}
+		loadingMessage := fmt.Sprintf("Running reverse ASIN search for %s...", displayASIN)
+		dismiss := showLoading(win, loadingMessage)
 		go func() {
+			defer dismiss()
 			reverseOutput.Set(fmt.Sprintf("Running reverse ASIN search for %s...", asin))
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
@@ -264,7 +285,10 @@ func buildCompetitiveTab(win fyne.Window, service *scraper.Service, countries []
 	campaignButton := widget.NewButton("Generate AMS Keywords", func() {
 		country := countrySelect.Selected
 		competitors := strings.Split(strings.ReplaceAll(competitorKeywordsEntry.Text, "\r", ""), "\n")
+		loadingMessage := "Generating Amazon Ads keyword ideas..."
+		dismiss := showLoading(win, loadingMessage)
 		go func() {
+			defer dismiss()
 			campaignOutput.Set("Generating keyword list...")
 			ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 			defer cancel()
@@ -332,7 +356,15 @@ func buildInternationalTab(win fyne.Window, service *scraper.Service, countries 
 			selected = countries
 		}
 		keyword := keywordEntry.Text
+		trimmedKeyword := strings.TrimSpace(keyword)
+		displayKeyword := trimmedKeyword
+		if displayKeyword == "" {
+			displayKeyword = "your keyword"
+		}
+		loadingMessage := fmt.Sprintf("Collecting international keyword data for %s...", displayKeyword)
+		dismiss := showLoading(win, loadingMessage)
 		go func() {
+			defer dismiss()
 			output.Set("Collecting international keyword data...")
 			ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
 			defer cancel()
@@ -369,6 +401,39 @@ func newResultPanel(title string, view *widget.Entry, textData binding.String, c
 	}
 
 	return container.NewBorder(label, container.NewHBox(actions...), nil, nil, view)
+}
+
+func showLoading(win fyne.Window, message string) func() {
+	if win == nil {
+		return func() {}
+	}
+
+	trimmed := strings.TrimSpace(message)
+	if trimmed == "" {
+		trimmed = "Fetching data..."
+	}
+
+	spinner := widget.NewProgressBarInfinite()
+	spinner.Start()
+
+	card := widget.NewCard("Working", trimmed, container.NewCenter(spinner))
+	padded := container.NewPadded(card)
+	centered := container.NewCenter(padded)
+	loading := dialog.NewCustomWithoutButtons("", centered, win)
+
+	min := card.MinSize()
+	width := min.Width + theme.Padding()*2
+	if width < 320 {
+		width = 320
+	}
+	height := min.Height + theme.Padding()*2
+	loading.Resize(fyne.NewSize(width, height))
+	loading.Show()
+
+	return func() {
+		spinner.Stop()
+		loading.Hide()
+	}
 }
 
 // makeEntryReadOnly prevents the user from editing result fields while still
