@@ -27,12 +27,25 @@ func Run() {
 	application := app.NewWithID("amazon-product-scraper")
 	application.Settings().SetTheme(theme.LightTheme())
 
-	service := scraper.NewService(25*time.Second, 25)
-	defer service.Close()
-
 	window := application.NewWindow("Amazon Product Intelligence Suite")
 	window.Resize(fyne.NewSize(1024, 720))
 	window.SetMaster()
+
+	licenseKey, licenseError := enforceLicense()
+	if licenseError != "" {
+		renderLicenseFailure(window, licenseError)
+		window.ShowAndRun()
+		return
+	}
+
+	title := "Amazon Product Intelligence Suite"
+	if licenseKey != "" {
+		title = fmt.Sprintf("%s — License %s", title, summarizeKey(licenseKey))
+	}
+	window.SetTitle(title)
+
+	service := scraper.NewService(25*time.Second, 25)
+	defer service.Close()
 
 	countries := scraper.Countries()
 	sort.Strings(countries)
