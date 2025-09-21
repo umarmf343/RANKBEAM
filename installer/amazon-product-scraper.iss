@@ -1,23 +1,30 @@
-; Amazon Product Scraper Installer
+#define LicenseApiBaseUrl "https://licensing.yourdomain.com"
+#define LicenseApiToken "REPLACE_WITH_INSTALLER_SECRET"
+#define LicenseStorageSubDir "AmazonProductIntelligence"
+#define LicenseFileName "license.key"
+
+; Amazon Product Scraper Installer with License Activation
 ; Generated for building a Windows setup package using Inno Setup
 
 [Setup]
 AppName=Amazon Product Intelligence Suite
 AppVersion=1.0.0
 AppPublisher=Amazon Intelligence Labs
+AppId={{A5E0D1E7-8F2E-4A83-8369-726F94F97884}}
 DefaultDirName={pf64}\AmazonProductIntelligence
 DefaultGroupName=Amazon Product Intelligence
 DisableProgramGroupPage=yes
 UninstallDisplayIcon={app}\amazon-product-scraper.exe
 OutputDir=.
 OutputBaseFilename=amazon-product-intelligence-setup
-; Provide an .ico file path if you want a custom installer icon.
-; SetupIconFile=..\assets\amazon-product-intelligence.ico
 Compression=lzma
 SolidCompression=yes
+ArchitecturesAllowed=x64
+ArchitecturesInstallIn64BitMode=x64
 
 [Files]
-Source: "..\amazon-product-scraper.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\bin\amazon-product-scraper.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\bin\fingerprint-helper.exe"; DestDir: "{tmp}"; Flags: ignoreversion deleteafterinstall
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
@@ -28,4 +35,200 @@ Name: "{commondesktop}\Amazon Product Intelligence"; Filename: "{app}\amazon-pro
 Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Additional icons:"; Flags: unchecked
 
 [Run]
-Filename: "{app}\amazon-product-scraper.exe"; Description: "Launch Amazon Product Intelligence"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\amazon-product-scraper.exe"; Description: "Launch Amazon Product Intelligence"; Parameters: "/licensekey={code:GetGeneratedLicenseKey}"; Flags: nowait postinstall skipifsilent; Check: ActivationCompletedSuccessfully
+
+[Code]
+var
+  CustomerInfoPage: TInputQueryWizardPage;
+  GeneratedLicenseKey: string;
+  ActivationFailed: Boolean;
+
+function LicenseStoragePath(): string;
+begin
+  Result := ExpandConstant('{localappdata}') + '\\' + '{#LicenseStorageSubDir}' + '\\' + '{#LicenseFileName}';
+end;
+
+function EscapeJson(const Value: string): string;
+var
+  I: Integer;
+  Ch: Char;
+begin
+  Result := '';
+  for I := 1 to Length(Value) do
+  begin
+    Ch := Value[I];
+    case Ch of
+      '"': Result := Result + '\\"';
+      '\\': Result := Result + '\\\\';
+      #8: Result := Result + '\\b';
+      #9: Result := Result + '\\t';
+      #10: Result := Result + '\\n';
+      #13: Result := Result + '\\r';
+    else
+      Result := Result + Ch;
+    end;
+  end;
+end;
+
+function ExtractJsonValue(const Json, Key: string): string;
+var
+  Pattern, Tail: string;
+  ColonPos, QuotePos, EndPos: Integer;
+begin
+  Result := '';
+  Pattern := '"' + Key + '"';
+  QuotePos := Pos(Pattern, Json);
+  if QuotePos = 0 then
+    Exit;
+  Tail := Copy(Json, QuotePos + Length(Pattern), MaxInt);
+  ColonPos := Pos(':', Tail);
+  if ColonPos = 0 then
+    Exit;
+  Tail := Trim(Copy(Tail, ColonPos + 1, MaxInt));
+  if (Tail = '') or (Tail[1] <> '"') then
+    Exit;
+  Tail := Copy(Tail, 2, MaxInt);
+  EndPos := Pos('"', Tail);
+  if EndPos = 0 then
+    Exit;
+  Result := Copy(Tail, 1, EndPos - 1);
+end;
+
+function GetCustomerEmail(): string;
+begin
+  Result := Trim(CustomerInfoPage.Values[0]);
+end;
+
+function GetMachineFingerprint(): string;
+var
+  ResultCode: Integer;
+  OutputPath: string;
+  Output: AnsiString;
+begin
+  OutputPath := ExpandConstant('{tmp}') + '\\fingerprint.out';
+  if FileExists(OutputPath) then
+    DeleteFile(OutputPath);
+
+  if not Exec(ExpandConstant('{tmp}') + '\\fingerprint-helper.exe', '--output ' + AddQuotes(OutputPath), '', SW_HIDE,
+    ewWaitUntilTerminated, ResultCode) then
+  begin
+    raise Exception.Create('Unable to start fingerprint helper.');
+  end;
+  if ResultCode <> 0 then
+    raise Exception.Create('Fingerprint helper exited with code ' + IntToStr(ResultCode) + '.');
+
+  if not LoadStringFromFile(OutputPath, Output) then
+    raise Exception.Create('Failed to read fingerprint output.');
+
+  Result := Trim(Output);
+  if Result = '' then
+    raise Exception.Create('Fingerprint helper returned an empty fingerprint.');
+
+  Log(Format('Derived machine fingerprint %s', [Result]));
+end;
+
+function RequestLicenseFromServer(const Fingerprint: string): string;
+var
+  WinHttpReq: Variant;
+  Url, Payload, Email: string;
+  Status: Integer;
+begin
+  Email := GetCustomerEmail();
+  if Email = '' then
+    raise Exception.Create('Email address is required for license activation.');
+
+  Url := '{#LicenseApiBaseUrl}/api/v1/licenses';
+  Payload := '{"customerId":"' + EscapeJson(Email) + '","fingerprint":"' + EscapeJson(Fingerprint) + '"}';
+
+  WinHttpReq := CreateOleObject('WinHttp.WinHttpRequest.5.1');
+  WinHttpReq.Open('POST', Url, False);
+  WinHttpReq.Option[9] := 2048; // WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_2
+  WinHttpReq.SetRequestHeader('Content-Type', 'application/json');
+  if '{#LicenseApiToken}' <> '' then
+    WinHttpReq.SetRequestHeader('X-Installer-Token', '{#LicenseApiToken}');
+  WinHttpReq.Send(Payload);
+
+  Status := WinHttpReq.Status;
+  Log(Format('License server responded with %d', [Status]));
+  if (Status <> 200) and (Status <> 201) then
+    raise Exception.CreateFmt('License request failed (%d): %s', [Status, WinHttpReq.ResponseText]);
+
+  Result := WinHttpReq.ResponseText;
+end;
+
+procedure PersistLicenseKey(const Key: string);
+var
+  StoragePath, StorageDir: string;
+begin
+  StoragePath := LicenseStoragePath();
+  StorageDir := ExtractFilePath(StoragePath);
+  if not DirExists(StorageDir) then
+  begin
+    if not ForceDirectories(StorageDir) then
+      raise Exception.Create('Unable to create directory for license key at ' + StorageDir);
+  end;
+  if not SaveStringToFile(StoragePath, Key, False) then
+    raise Exception.Create('Unable to write license key to ' + StoragePath);
+  Log('Stored license key at ' + StoragePath);
+end;
+
+procedure ShowLicenseKey(const Key: string);
+begin
+  MsgBox('Installation complete! Your license key is:\n\n' + Key + '\n\nIt has been saved automatically to ' + LicenseStoragePath() +
+    '. Keep a copy for your records.', mbInformation, MB_OK);
+end;
+
+function ActivateLicense(): string;
+var
+  Fingerprint, Response, Key: string;
+begin
+  Fingerprint := GetMachineFingerprint();
+  Response := RequestLicenseFromServer(Fingerprint);
+  Key := ExtractJsonValue(Response, 'licenseKey');
+  if Key = '' then
+    raise Exception.Create('License server response did not include a license key.');
+  PersistLicenseKey(Key);
+  ShowLicenseKey(Key);
+  Result := Key;
+end;
+
+procedure InitializeWizard;
+begin
+  CustomerInfoPage := CreateInputQueryPage(wpUserInfo, 'License Activation', 'Enter your customer details',
+    'Provide the email address or order identifier used at purchase. It will be used to issue your license key.');
+  CustomerInfoPage.Add('Email address:', False);
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then
+  begin
+    try
+      GeneratedLicenseKey := ActivateLicense();
+      ActivationFailed := False;
+    except
+      on E: Exception do
+      begin
+        ActivationFailed := True;
+        GeneratedLicenseKey := '';
+        SuppressibleMsgBox('License activation failed:\n\n' + E.Message + '\n\nYou can rerun the installer or contact support to complete activation.',
+          mbError, MB_OK, IDOK);
+      end;
+    end;
+  end;
+end;
+
+function ActivationCompletedSuccessfully(): Boolean;
+begin
+  Result := (not ActivationFailed) and (GeneratedLicenseKey <> '');
+end;
+
+function GetGeneratedLicenseKey(Param: string): string;
+begin
+  Result := GeneratedLicenseKey;
+end;
+
+function NeedRestart(): Boolean;
+begin
+  Result := False;
+end;
