@@ -5,6 +5,8 @@ go 1.21
 require (
 	fyne.io/fyne/v2 v2.4.5
 	github.com/PuerkitoBio/goquery v1.8.1
+	github.com/denisbrodbeck/machineid v1.0.1
+	github.com/mattn/go-sqlite3 v1.14.32
 )
 
 require (

@@ -1,26 +1,27 @@
 package ui
 
 import (
-	"context"
-	"encoding/csv"
-	"errors"
-	"fmt"
-	"sort"
-	"strconv"
-	"strings"
-	"time"
+        "context"
+        "encoding/csv"
+        "errors"
+        "fmt"
+        "sort"
+        "strconv"
+        "strings"
+        "time"
 
-	"fyne.io/fyne/v2"
-	"fyne.io/fyne/v2/app"
-	"fyne.io/fyne/v2/container"
-	"fyne.io/fyne/v2/data/binding"
-	"fyne.io/fyne/v2/dialog"
-	"fyne.io/fyne/v2/layout"
-	"fyne.io/fyne/v2/storage"
-	"fyne.io/fyne/v2/theme"
-	"fyne.io/fyne/v2/widget"
+        "fyne.io/fyne/v2"
+        "fyne.io/fyne/v2/app"
+        "fyne.io/fyne/v2/container"
+        "fyne.io/fyne/v2/data/binding"
+        "fyne.io/fyne/v2/dialog"
+        "fyne.io/fyne/v2/layout"
+        "fyne.io/fyne/v2/storage"
+        "fyne.io/fyne/v2/theme"
+        "fyne.io/fyne/v2/widget"
 
-	"github.com/umar/amazon-product-scraper/internal/scraper"
+        "github.com/umar/amazon-product-scraper/internal/licenseclient"
+        "github.com/umar/amazon-product-scraper/internal/scraper"
 )
 
 func Run() {
@@ -52,15 +53,26 @@ func Run() {
 	internationalBinding := binding.NewString()
 	internationalBinding.Set("International keyword suggestions will appear here.")
 
-	tabs := container.NewAppTabs(
-		container.NewTabItem("Product Lookup", buildProductLookupTab(window, service, countries, productBinding)),
-		container.NewTabItem("Keyword Research", buildKeywordResearchTab(window, service, countries, keywordBinding, categoryBinding, bestsellerBinding)),
-		container.NewTabItem("Competitive Analysis", buildCompetitiveTab(window, service, countries, reverseBinding, campaignBinding)),
-		container.NewTabItem("International", buildInternationalTab(window, service, countries, internationalBinding)),
-	)
+        tabs := container.NewAppTabs(
+                container.NewTabItem("Product Lookup", buildProductLookupTab(window, service, countries, productBinding)),
+                container.NewTabItem("Keyword Research", buildKeywordResearchTab(window, service, countries, keywordBinding, categoryBinding, bestsellerBinding)),
+                container.NewTabItem("Competitive Analysis", buildCompetitiveTab(window, service, countries, reverseBinding, campaignBinding)),
+                container.NewTabItem("International", buildInternationalTab(window, service, countries, internationalBinding)),
+        )
 
-	window.SetContent(tabs)
-	window.ShowAndRun()
+        licenseClient := licenseclient.NewClient("")
+        storage, err := licenseclient.NewStorage(application.UniqueID())
+        if err != nil {
+                errorContent := container.NewCenter(widget.NewLabel(fmt.Sprintf("Unable to initialize license storage: %v", err)))
+                window.SetContent(errorContent)
+        } else {
+                gate := newLicenseGate(window, licenseClient, storage, func() {
+                        window.SetContent(tabs)
+                })
+                window.SetContent(gate)
+        }
+
+        window.ShowAndRun()
 }
 
 func buildProductLookupTab(win fyne.Window, service *scraper.Service, countries []string, output binding.String) fyne.CanvasObject {
