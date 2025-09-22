@@ -1,41 +1,41 @@
 #define LicenseApiBaseUrl "https://licensing.yourdomain.com"
 #define LicenseApiToken "REPLACE_WITH_INSTALLER_SECRET"
-#define LicenseStorageSubDir "AmazonProductIntelligence"
+#define LicenseStorageSubDir "RankBeam"
 #define LicenseFileName "license.key"
 
-; Amazon Product Scraper Installer with License Activation
+; RankBeam Installer with License Activation
 ; Generated for building a Windows setup package using Inno Setup
 
 [Setup]
-AppName=Amazon Product Intelligence Suite
+AppName=RankBeam
 AppVersion=1.0.0
 AppPublisher=Amazon Intelligence Labs
 AppId={{A5E0D1E7-8F2E-4A83-8369-726F94F97884}}
-DefaultDirName={pf64}\AmazonProductIntelligence
-DefaultGroupName=Amazon Product Intelligence
+DefaultDirName={pf64}\RankBeam
+DefaultGroupName=RankBeam
 DisableProgramGroupPage=yes
-UninstallDisplayIcon={app}\amazon-product-scraper.exe
+UninstallDisplayIcon={app}\rankbeam.exe
 OutputDir=.
-OutputBaseFilename=amazon-product-intelligence-setup
+OutputBaseFilename=rankbeam-setup
 Compression=lzma
 SolidCompression=yes
 ArchitecturesAllowed=x64
 ArchitecturesInstallIn64BitMode=x64
 
 [Files]
-Source: "..\bin\amazon-product-scraper.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\bin\rankbeam.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\bin\fingerprint-helper.exe"; DestDir: "{tmp}"; Flags: ignoreversion deleteafterinstall
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\Amazon Product Intelligence"; Filename: "{app}\amazon-product-scraper.exe"
-Name: "{commondesktop}\Amazon Product Intelligence"; Filename: "{app}\amazon-product-scraper.exe"; Tasks: desktopicon
+Name: "{group}\RankBeam"; Filename: "{app}\rankbeam.exe"
+Name: "{commondesktop}\RankBeam"; Filename: "{app}\rankbeam.exe"; Tasks: desktopicon
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Additional icons:"; Flags: unchecked
 
 [Run]
-Filename: "{app}\amazon-product-scraper.exe"; Description: "Launch Amazon Product Intelligence"; Parameters: "/licensekey={code:GetGeneratedLicenseKey}"; Flags: nowait postinstall skipifsilent; Check: ActivationCompletedSuccessfully
+Filename: "{app}\rankbeam.exe"; Description: "Launch RankBeam"; Parameters: "/licensekey={code:GetGeneratedLicenseKey}"; Flags: nowait postinstall skipifsilent; Check: ActivationCompletedSuccessfully
 
 [Code]
 var

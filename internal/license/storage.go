@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-const productConfigDir = "AmazonProductSuite"
+const productConfigDir = "RankBeam"
 
 var ErrEmptyLicenseKey = errors.New("license: empty key on disk")
 

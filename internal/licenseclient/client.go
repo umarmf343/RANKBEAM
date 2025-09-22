@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-    "github.com/umarmf343/Umar-kdp-product-api/internal/license"
+	"github.com/umarmf343/Umar-kdp-product-api/internal/license"
 )
 
 // Envelope captures the details returned from the licensing API.
@@ -144,7 +144,7 @@ func (s *Storage) Path() string {
 func sanitizeAppID(appID string) string {
 	appID = strings.TrimSpace(appID)
 	if appID == "" {
-		return "AmazonProductSuite"
+		return "RankBeam"
 	}
 	cleaned := make([]rune, 0, len(appID))
 	for _, r := range appID {
@@ -154,7 +154,7 @@ func sanitizeAppID(appID string) string {
 		}
 	}
 	if len(cleaned) == 0 {
-		return "AmazonProductSuite"
+		return "RankBeam"
 	}
 	return string(cleaned)
 }

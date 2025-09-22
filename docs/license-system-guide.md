@@ -1,6 +1,6 @@
 # Comprehensive License System Guide (Inno Setup + Go Server)
 
-This guide walks you through replicating a "Publisher Rocket" style licensing flow for the Amazon Product Intelligence Suite. The solution has two cooperating halves:
+This guide walks you through replicating a "Publisher Rocket" style licensing flow for RankBeam. The solution has two cooperating halves:
 
 1. **Client-side installer automation** authored with **Inno Setup**. During setup it fingerprints the machine, calls your licensing API, returns a license key to the customer, and stores it for future validations.
 2. **Server-side APIs** written in **Go** that mint, store, and validate licenses that are bound to hardware fingerprints.
@@ -27,24 +27,24 @@ The installer will: (a) collect a customer identifier, (b) derive a machine fing
 
 ### 1.1 Installer Script Layout
 
-Create `installer/amazon-product-suite.iss` (or adapt your existing script) with the following skeleton:
+Create `installer/rankbeam.iss` (or adapt your existing script) with the following skeleton:
 
 ```pascal
 [Setup]
-AppName=Amazon Product Intelligence Suite
+AppName=RankBeam
 AppVersion=1.0.0
-DefaultDirName={autopf}\Amazon Product Intelligence Suite
-DefaultGroupName=Amazon Product Intelligence Suite
+DefaultDirName={autopf}\RankBeam
+DefaultGroupName=RankBeam
 DisableProgramGroupPage=yes
 OutputDir=dist
-OutputBaseFilename=amazon-product-suite
+OutputBaseFilename=rankbeam
 
 [Files]
-Source: "..\bin\amazon-product-scraper.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\bin\rankbeam.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\bin\fingerprint-helper.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall
 
 [Run]
-Filename: "{app}\amazon-product-scraper.exe"; Parameters: "/licensekey={code:GetLicenseKey}"; Flags: runhidden
+Filename: "{app}\rankbeam.exe"; Parameters: "/licensekey={code:GetLicenseKey}"; Flags: runhidden
 
 [Code]
 var
@@ -188,7 +188,7 @@ procedure PersistLicenseKey(const Key: string);
 var
   StoragePath: string;
 begin
-  StoragePath := ExpandConstant('{localappdata}') + '\\AmazonProductSuite\\license.key';
+  StoragePath := ExpandConstant('{localappdata}') + '\\RankBeam\\license.key';
   ForceDirectories(ExtractFilePath(StoragePath));
   if not SaveStringToFile(StoragePath, Key, False) then
     Log('Failed to store license key at ' + StoragePath);
@@ -388,12 +388,12 @@ Content-Type: application/json
 ## 3. Runtime License Checks in the Desktop App
 
 1. **Startup**: compute the same fingerprint used by the installer.
-2. **Load**: read the cached license key from `%LOCALAPPDATA%\AmazonProductSuite\license.key` (or Credential Locker).
+2. **Load**: read the cached license key from `%LOCALAPPDATA%\RankBeam\license.key` (or Credential Locker).
 3. **Validate**: call the `/validate` endpoint. If successful, cache the timestamp; if not, show a blocking dialog.
 4. **Offline grace**: allow a small grace period (e.g., 3 launches within 48 hours) when the last validation was successful.
 5. **Transfer flow**: provide a support channel or self-service portal to revoke an old fingerprint and issue a replacement key when a user upgrades hardware.
 
-> **Desktop configuration:** The Fyne UI integrates `internal/license` to read `%LOCALAPPDATA%\AmazonProductSuite\license.key`, compute the local fingerprint, and call the validation endpoint on every launch. Set `LICENSE_API_URL` (e.g., `https://licensing.yourdomain.com`) and `LICENSE_API_TOKEN` before starting the app so it can reach your server. Missing variables or validation failures surface a blocking dialog that explains how to recover.
+> **Desktop configuration:** The Fyne UI integrates `internal/license` to read `%LOCALAPPDATA%\RankBeam\license.key`, compute the local fingerprint, and call the validation endpoint on every launch. Set `LICENSE_API_URL` (e.g., `https://licensing.yourdomain.com`) and `LICENSE_API_TOKEN` before starting the app so it can reach your server. Missing variables or validation failures surface a blocking dialog that explains how to recover.
 
 ---
 

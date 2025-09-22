@@ -58,7 +58,7 @@ func licenseErrorMessage(err error) string {
 }
 
 func renderLicenseFailure(window fyne.Window, client *license.Client, message string) {
-	window.SetTitle("Amazon Product Intelligence Suite — Activate License")
+	window.SetTitle("RankBeam — Activate License")
 
 	heroTitle := canvas.NewText("Activate Your Competitive Edge", theme.PrimaryColor())
 	heroTitle.TextStyle = fyne.TextStyle{Bold: true}
