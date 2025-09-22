@@ -10,7 +10,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/umar/amazon-product-scraper/internal/licensing"
+    "github.com/umarmf343/Umar-kdp-product-api/internal/licensing"
 )
 
 func main() {

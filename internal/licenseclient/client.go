@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/umar/amazon-product-scraper/internal/license"
+    "github.com/umarmf343/Umar-kdp-product-api/internal/license"
 )
 
 // Envelope captures the details returned from the licensing API.

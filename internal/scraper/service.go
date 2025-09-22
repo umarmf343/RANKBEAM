@@ -18,7 +18,7 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 
-	"github.com/umar/amazon-product-scraper/internal/logging"
+    "github.com/umarmf343/Umar-kdp-product-api/internal/logging"
 )
 
 // Service encapsulates HTTP access and scraping helpers used by the application.
