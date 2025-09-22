@@ -25,30 +25,47 @@ import (
 
 const requestTimeout = 30 * time.Second
 
+var activeService *scraper.Service
+
 // Run initialises and displays the desktop application.
 func Run() {
 	application := app.NewWithID("amazon-product-scraper")
 	application.Settings().SetTheme(theme.LightTheme())
 
+	if lifecycle := application.Lifecycle(); lifecycle != nil {
+		lifecycle.SetOnStopped(func() {
+			if activeService != nil {
+				activeService.Close()
+			}
+		})
+	}
+
 	window := application.NewWindow("Amazon Product Intelligence Suite")
 	window.Resize(fyne.NewSize(1024, 720))
 	window.SetMaster()
 
-	licenseKey, licenseError := enforceLicense()
+	client, licenseKey, licenseError := enforceLicense()
 	if licenseError != "" {
-		renderLicenseFailure(window, licenseError)
+		renderLicenseFailure(window, client, licenseError)
 		window.ShowAndRun()
 		return
 	}
 
-	title := "Amazon Product Intelligence Suite"
-	if licenseKey != "" {
-		title = fmt.Sprintf("%s — License %s", title, summarizeKey(licenseKey))
+	loadMainApplication(window, licenseKey)
+	window.ShowAndRun()
+}
+
+func loadMainApplication(window fyne.Window, licenseKey string) {
+	if window == nil {
+		return
 	}
-	window.SetTitle(title)
+
+	if activeService != nil {
+		activeService.Close()
+	}
 
 	service := scraper.NewService(25*time.Second, 25)
-	defer service.Close()
+	activeService = service
 
 	countries := scraper.Countries()
 	sort.Strings(countries)
@@ -77,7 +94,12 @@ func Run() {
 	tabs.SetTabLocation(container.TabLocationTop)
 
 	window.SetContent(tabs)
-	window.ShowAndRun()
+
+	title := "Amazon Product Intelligence Suite"
+	if licenseKey != "" {
+		title = fmt.Sprintf("%s — License %s", title, summarizeKey(licenseKey))
+	}
+	window.SetTitle(title)
 }
 
 func buildProductLookupTab(window fyne.Window, service *scraper.Service, countries []string, result binding.String) fyne.CanvasObject {
