@@ -1,4 +1,4 @@
-module github.com/umar/amazon-product-scraper
+module github.com/umarmf343/Umar-kdp-product-api
 
 go 1.23.0
 
