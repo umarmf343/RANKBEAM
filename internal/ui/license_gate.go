@@ -12,7 +12,7 @@ import (
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
 
-	"github.com/umar/amazon-product-scraper/internal/license"
+    "github.com/umarmf343/Umar-kdp-product-api/internal/license"
 )
 
 func enforceLicense() (string, string) {

@@ -20,7 +20,7 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
-	"github.com/umar/amazon-product-scraper/internal/scraper"
+    "github.com/umarmf343/Umar-kdp-product-api/internal/scraper"
 )
 
 const requestTimeout = 30 * time.Second

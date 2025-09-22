@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/umar/amazon-product-scraper/internal/licenseclient"
+    "github.com/umarmf343/Umar-kdp-product-api/internal/licenseclient"
 )
 
 func main() {

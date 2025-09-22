@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/umar/amazon-product-scraper/internal/license"
+    "github.com/umarmf343/Umar-kdp-product-api/internal/license"
 )
 
 func main() {
