@@ -15,7 +15,7 @@ The document is self-contained so that you can integrate licensing without needi
 | --- | --- |
 | Installer tooling | [Inno Setup 6+](https://jrsoftware.org/isinfo.php) with the built-in script editor or Inno Script Studio. |
 | Desktop binary | Windows build of your Go/Fyne application (e.g. `GOOS=windows GOARCH=amd64 go build ./cmd/app`). |
-| Backend | Go 1.21+, SQLite 3 (or preferred DB), and ability to expose an HTTPS endpoint. |
+| Backend | Go 1.23+ (the module pins toolchain Go 1.24.3), SQLite 3 (or preferred DB), and ability to expose an HTTPS endpoint. |
 | Networking | Outbound HTTPS connectivity from installers and clients to your API domain. |
 | Security | Access to Windows Credential Locker or DPAPI if you plan to encrypt stored keys. |
 
