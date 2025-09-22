@@ -1,4 +1,4 @@
-# Building the Amazon Product Intelligence Suite for Windows
+# Building RankBeam for Windows
 
 This repository now contains a Go/Fyne desktop application that wraps the scraping logic exposed by the original amazon-product-api project. Follow the steps below to compile a distributable Windows executable and package it with an installer.
 
@@ -27,16 +27,16 @@ go run ./cmd/app
 
 ```bash
 # Application binary used by both the FYNE package and the installer
-GOOS=windows GOARCH=amd64 go build -o bin/amazon-product-scraper.exe ./cmd/app
+GOOS=windows GOARCH=amd64 go build -o bin/rankbeam.exe ./cmd/app
 
 # Helper that calculates the machine fingerprint during setup
 GOOS=windows GOARCH=amd64 go build -o bin/fingerprint-helper.exe ./cmd/fingerprint-helper
 
 # Optional: produce a Fyne-packaged executable with embedded resources
 fyne package -os windows -icon assets/app.png \
-  -name "Amazon Product Intelligence" \
-  -appID com.amazon.intelligence \
-  -executable bin/amazon-product-scraper.exe \
+  -name "RankBeam" \
+  -appID com.rankbeam.app \
+  -executable bin/rankbeam.exe \
   -release
 ```
 
@@ -46,10 +46,10 @@ The two `go build` commands place the artifacts where the installer expects them
 
 ## 5. Package with Inno Setup
 
-1. Ensure `bin/amazon-product-scraper.exe` and `bin/fingerprint-helper.exe` exist from the previous step.
-2. Open `installer/amazon-product-scraper.iss` with Inno Setup.
+1. Ensure `bin/rankbeam.exe` and `bin/fingerprint-helper.exe` exist from the previous step.
+2. Open `installer/rankbeam.iss` with Inno Setup.
 3. Adjust the optional icon path if you have a custom icon.
-4. Build the installer to produce `amazon-product-intelligence-setup.exe`.
+4. Build the installer to produce `rankbeam-setup.exe`.
 
 ## 6. Verify the build
 

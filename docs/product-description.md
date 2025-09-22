@@ -1,6 +1,6 @@
-# Amazon Product Intelligence Suite
+# RankBeam
 
-Introducing the Amazon Product Intelligence Suite: your end-to-end desktop companion for decoding the Amazon marketplace. Built on top of the proven amazon-product-api engine, this Windows-ready app combines a polished Fyne UI with powerful research workflows inspired by Publisher Rocket.
+Introducing RankBeam: your end-to-end desktop companion for decoding the Amazon marketplace. Built on top of the proven amazon-product-api engine, this Windows-ready app combines a polished Fyne UI with powerful research workflows inspired by Publisher Rocket.
 
 **Why users love it**
 

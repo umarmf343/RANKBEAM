@@ -1,7 +1,7 @@
-Amazon Product Intelligence Suite – Windows Installation Guide
+RankBeam – Windows Installation Guide
 ==============================================================
 
-This document walks you through setting up, running, and packaging the Amazon Product Intelligence Suite desktop application on Windows. It assumes no prior experience with Go or the Fyne toolkit and focuses on a clean Windows 10/11 64-bit system.
+This document walks you through setting up, running, and packaging the RankBeam desktop application on Windows. It assumes no prior experience with Go or the Fyne toolkit and focuses on a clean Windows 10/11 64-bit system.
 
 ------------------------------------------------------------
 1. What You Will Build
@@ -119,7 +119,7 @@ cd Umar-kdp-product-api
    $env:CGO_ENABLED = "1"
    go run ./cmd/app
    ```
-2. After a short build, a window titled **Amazon Product Intelligence** should appear.
+2. After a short build, a window titled **RankBeam** should appear.
 3. Use the various tabs to verify that the interface works. Close the PowerShell window or press **Ctrl+C** in the terminal when you are finished testing.
 
 Troubleshooting tips:
@@ -132,7 +132,7 @@ Troubleshooting tips:
 To produce a 64-bit `.exe` file:
 ```powershell
 $env:CGO_ENABLED = "1"
-go build -o "Amazon Product Intelligence.exe" ./cmd/app
+go build -o "rankbeam.exe" ./cmd/app
 ```
 The executable will appear in the project root. Double-clicking it should launch the same UI as `go run` did.
 
@@ -142,21 +142,21 @@ $env:CGO_ENABLED = "1"
 fyne package `
   -os windows `
   -icon assets/app.png `
-  -name "Amazon Product Intelligence" `
-  -appID com.amazon.intelligence `
+  -name "RankBeam" `
+  -appID com.rankbeam.app `
   -sourceDir cmd/app
 ```
-This command reads metadata from `cmd/app` and produces `Amazon Product Intelligence.exe` inside the project root. If you supply both `assets/app.png` and `assets/app.ico`, Fyne will embed the icon in the executable. (The repository includes placeholder files—replace them with your own artwork if desired.)
+This command reads metadata from `cmd/app` and produces `rankbeam.exe` inside the project root. If you supply both `assets/app.png` and `assets/app.ico`, Fyne will embed the icon in the executable. (The repository includes placeholder files—replace them with your own artwork if desired.)
 
 ------------------------------------------------------------
 8. Build an Installer with Inno Setup (Optional)
 ------------------------------------------------------------
-1. Ensure `Amazon Product Intelligence.exe` exists in the project root (copy or rename your build if necessary).
+1. Ensure `rankbeam.exe` exists in the project root (copy or rename your build if necessary).
 2. Launch **Inno Setup Compiler**.
-3. Click **File → Open…** and choose `installer\amazon-product-scraper.iss` from this repository.
-4. Review the script. The defaults place the app in `C:\Program Files\AmazonProductIntelligence` and create Start Menu/desktop shortcuts.
+3. Click **File → Open…** and choose `installer\rankbeam.iss` from this repository.
+4. Review the script. The defaults place the app in `C:\Program Files\RankBeam` and create Start Menu/desktop shortcuts.
 5. Click **Build → Compile**. When prompted, choose a destination folder or accept the default.
-6. After a successful build, Inno Setup will display `amazon-product-intelligence-setup.exe` in the project’s `installer` folder.
+6. After a successful build, Inno Setup will display `rankbeam-setup.exe` in the project’s `installer` folder.
 7. Double-click the generated installer to test the installation flow on your machine.
 
 Optional adjustments before compiling:
@@ -167,9 +167,9 @@ Optional adjustments before compiling:
 9. Verify the Installation
 ------------------------------------------------------------
 1. Run the generated installer and follow the prompts.
-2. After installation, launch **Amazon Product Intelligence** from the Start menu or the desktop shortcut.
+2. After installation, launch **RankBeam** from the Start menu or the desktop shortcut.
 3. Confirm that the application opens and that each tab can perform network requests.
-4. To uninstall, open **Settings → Apps → Installed Apps**, find **Amazon Product Intelligence**, and click **Uninstall**.
+4. To uninstall, open **Settings → Apps → Installed Apps**, find **RankBeam**, and click **Uninstall**.
 
 ------------------------------------------------------------
 10. Keeping the Project Up to Date
@@ -188,7 +188,7 @@ Optional adjustments before compiling:
 * **`fatal error: 'stdint.h' file not found`** – Ensure MSYS2 toolchain packages are installed and on the PATH.
 * **`go: no Go files`** – Run commands from the project root (where `go.mod` lives).
 * **`fyne: command not found`** – Reopen PowerShell so the updated PATH is recognized or append `%USERPROFILE%\go\bin` to the system PATH.
-* **Installer builds but app will not launch** – Confirm that `Amazon Product Intelligence.exe` was freshly copied next to the `.iss` script before compiling.
+* **Installer builds but app will not launch** – Confirm that `rankbeam.exe` was freshly copied next to the `.iss` script before compiling.
 * **Antivirus warnings** – New unsigned executables or installers may trigger SmartScreen; choose “More info → Run anyway” during testing or sign the binaries with a code-signing certificate for distribution.
 
 ------------------------------------------------------------
@@ -198,4 +198,4 @@ Optional adjustments before compiling:
 * Explore `docs/BUILD_WINDOWS.md` for concise developer-oriented build notes and advanced cross-compilation workflows.
 * Review the source under `cmd/app` and `internal` to adapt the scraping workflows to your needs.
 
-You now have everything required to build, install, and distribute the Amazon Product Intelligence Suite on Windows.
+You now have everything required to build, install, and distribute the RankBeam on Windows.

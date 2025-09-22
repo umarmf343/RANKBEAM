@@ -29,7 +29,7 @@ var activeService *scraper.Service
 
 // Run initialises and displays the desktop application.
 func Run() {
-	application := app.NewWithID("amazon-product-scraper")
+	application := app.NewWithID("rankbeam")
 	application.Settings().SetTheme(theme.LightTheme())
 
 	if lifecycle := application.Lifecycle(); lifecycle != nil {
@@ -40,7 +40,7 @@ func Run() {
 		})
 	}
 
-	window := application.NewWindow("Amazon Product Intelligence Suite")
+	window := application.NewWindow("RankBeam")
 	window.Resize(fyne.NewSize(1024, 720))
 	window.SetMaster()
 
@@ -95,7 +95,7 @@ func loadMainApplication(window fyne.Window, licenseKey string) {
 
 	window.SetContent(tabs)
 
-	title := "Amazon Product Intelligence Suite"
+	title := "RankBeam"
 	if licenseKey != "" {
 		title = fmt.Sprintf("%s — License %s", title, summarizeKey(licenseKey))
 	}

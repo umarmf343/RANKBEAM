@@ -15,10 +15,10 @@ go run ./cmd/app
 
 # build a Windows executable from Windows
 $env:CGO_ENABLED = "1"
-go build -o "Amazon Product Intelligence.exe" ./cmd/app
+go build -o "rankbeam.exe" ./cmd/app
 
 # cross-compile the Windows executable from Linux/macOS
-CGO_ENABLED=1 GOOS=windows GOARCH=amd64 go build -o "Amazon Product Intelligence.exe" ./cmd/app
+CGO_ENABLED=1 GOOS=windows GOARCH=amd64 go build -o "rankbeam.exe" ./cmd/app
 
 
 2. Create the docs/BUILD_WINDOWS.md File:
@@ -26,7 +26,7 @@ CGO_ENABLED=1 GOOS=windows GOARCH=amd64 go build -o "Amazon Product Intelligence
 Create or overwrite a file named BUILD_WINDOWS.md in the docs folder of your project with the following content:
 
 
-# Building the Amazon Product Intelligence Suite for Windows
+# Building RankBeam for Windows
 
 ## 1. Prerequisites (Windows)
 
@@ -66,13 +66,13 @@ fyne package `
   -os windows `
   -icon assets/app.png `
   -sourceDir cmd/app `
-  -name "Amazon Product Intelligence" `
-  -appID com.amazon.intelligence
+  -name "RankBeam" `
+  -appID com.rankbeam.app
 
 Alternatively, you can build directly using Go:
 
 $env:CGO_ENABLED = "1"
-go build -o "Amazon Product Intelligence.exe" ./cmd/app
+go build -o "rankbeam.exe" ./cmd/app
 
 5. Cross-compile from Linux (Optional)
 
@@ -81,13 +81,13 @@ On Linux, install MinGW and use the following commands:
 
 CGO_ENABLED=1 GOOS=windows GOARCH=amd64 CC=x86_64-w64-mingw32-gcc \
   fyne package -os windows -icon assets/app.png -sourceDir cmd/app \
-  -name "Amazon Product Intelligence" -appID com.amazon.intelligence
+  -name "RankBeam" -appID com.rankbeam.app
 
 6. Package with Inno Setup
 
 Use Inno Setup to package the application:
 
-Open installer/amazon-product-scraper.iss with Inno Setup and follow the instructions to build the installer.
+Open installer/rankbeam.iss with Inno Setup and follow the instructions to build the installer.
 
 
 7. Verify the build
@@ -103,40 +103,40 @@ Bundle the installer and product description for release.
 
 
 
-3. Create the installer/amazon-product-scraper.iss File:
+3. Create the installer/rankbeam.iss File:
 
-Create or overwrite the amazon-product-scraper.iss file in the installer folder with this content:
+Create or overwrite the rankbeam.iss file in the installer folder with this content:
 
 
-; Amazon Product Scraper Installer
+; RankBeam Installer
 ; Generated for building a Windows setup package using Inno Setup
 
 [Setup]
-AppName=Amazon Product Intelligence Suite
+AppName=RankBeam
 AppVersion=1.0.0
 AppPublisher=Amazon Intelligence Labs
-DefaultDirName={pf64}\AmazonProductIntelligence
-DefaultGroupName=Amazon Product Intelligence
+DefaultDirName={pf64}\RankBeam
+DefaultGroupName=RankBeam
 DisableProgramGroupPage=yes
-UninstallDisplayIcon={app}\Amazon Product Intelligence.exe
+UninstallDisplayIcon={app}\rankbeam.exe
 OutputDir=.
-OutputBaseFilename=amazon-product-intelligence-setup
+OutputBaseFilename=rankbeam-setup
 Compression=lzma
 SolidCompression=yes
 
 [Files]
-Source: "..\Amazon Product Intelligence.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\bin\rankbeam.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\Amazon Product Intelligence"; Filename: "{app}\Amazon Product Intelligence.exe"
-Name: "{commondesktop}\Amazon Product Intelligence"; Filename: "{app}\Amazon Product Intelligence.exe"; Tasks: desktopicon
+Name: "{group}\RankBeam"; Filename: "{app}\rankbeam.exe"
+Name: "{commondesktop}\RankBeam"; Filename: "{app}\rankbeam.exe"; Tasks: desktopicon
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Additional icons:"; Flags: unchecked
 
 [Run]
-Filename: "{app}\Amazon Product Intelligence.exe"; Description: "Launch Amazon Product Intelligence"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\rankbeam.exe"; Description: "Launch RankBeam"; Flags: nowait postinstall skipifsilent
 
 
 

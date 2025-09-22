@@ -26,7 +26,7 @@ Very useful tool that is able to extract almost same amount of data as the offic
 
 ## Desktop Application (Go/Fyne)
 
-This fork adds a cross-platform desktop experience named **Amazon Product Intelligence Suite**. The application is written in Go using the Fyne toolkit and bundles multiple research workflows:
+This fork adds a cross-platform desktop experience named **RankBeam**. The application is written in Go using the Fyne toolkit and bundles multiple research workflows:
 
 - Beautiful multi-tab user interface for product lookups, keyword research, competitive analysis, and international market discovery.
 - Backend service with request throttling, timeout management, and heuristic scoring to keep Amazon scraping reliable.
@@ -41,7 +41,7 @@ This fork adds a cross-platform desktop experience named **Amazon Product Intell
 go run ./cmd/app
 
 # build a Windows executable
-GOOS=windows GOARCH=amd64 go build -o amazon-product-scraper.exe ./cmd/app
+GOOS=windows GOARCH=amd64 go build -o rankbeam.exe ./cmd/app
 ```
 
 More detailed packaging instructions (including the Inno Setup installer) are available in [`docs/BUILD_WINDOWS.md`](docs/BUILD_WINDOWS.md).
