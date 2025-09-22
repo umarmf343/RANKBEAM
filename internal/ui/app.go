@@ -113,7 +113,7 @@ func buildProductLookupTab(window fyne.Window, service *scraper.Service, countri
 
 			details, err := service.FetchProduct(ctx, asin, country)
 
-			fyne.CurrentApp().Driver().RunOnMain(func() {
+			queueOnMain(window, func() {
 				progress.Hide()
 				if err != nil {
 					dialog.ShowError(err, window)
@@ -195,7 +195,7 @@ func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, count
 
 			insights, err := service.KeywordSuggestions(ctx, seed, country, filters)
 
-			fyne.CurrentApp().Driver().RunOnMain(func() {
+			queueOnMain(window, func() {
 				progress.Hide()
 				if err != nil {
 					dialog.ShowError(err, window)
@@ -228,7 +228,7 @@ func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, count
 
 			trends, err := service.FetchCategoryTrends(ctx, seed, country)
 
-			fyne.CurrentApp().Driver().RunOnMain(func() {
+			queueOnMain(window, func() {
 				progress.Hide()
 				if err != nil {
 					dialog.ShowError(err, window)
@@ -267,7 +267,7 @@ func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, count
 
 			products, err := service.BestsellerAnalysis(ctx, seed, country, filter)
 
-			fyne.CurrentApp().Driver().RunOnMain(func() {
+			queueOnMain(window, func() {
 				progress.Hide()
 				if err != nil {
 					dialog.ShowError(err, window)
@@ -369,7 +369,7 @@ func buildCompetitiveTab(window fyne.Window, service *scraper.Service, countries
 
 			insights, err := service.ReverseASINSearch(ctx, asin, country, filters)
 
-			fyne.CurrentApp().Driver().RunOnMain(func() {
+			queueOnMain(window, func() {
 				progress.Hide()
 				if err != nil {
 					dialog.ShowError(err, window)
@@ -403,7 +403,7 @@ func buildCompetitiveTab(window fyne.Window, service *scraper.Service, countries
 
 			keywords, err := service.GenerateAMSKeywords(ctx, titleEntry.Text, descriptionEntry.Text, competitors, country)
 
-			fyne.CurrentApp().Driver().RunOnMain(func() {
+			queueOnMain(window, func() {
 				progress.Hide()
 				if err != nil {
 					dialog.ShowError(err, window)
@@ -476,7 +476,7 @@ func buildInternationalTab(window fyne.Window, service *scraper.Service, countri
 
 			keywords, err := service.InternationalKeywords(ctx, keyword, selected)
 
-			fyne.CurrentApp().Driver().RunOnMain(func() {
+			queueOnMain(window, func() {
 				progress.Hide()
 				if err != nil {
 					dialog.ShowError(err, window)
@@ -803,6 +803,34 @@ func safeSet(target binding.String, value string) {
 	if err := target.Set(value); err != nil {
 		fyne.LogError("failed to update binding", err)
 	}
+}
+
+type queueableWindow interface {
+	QueueEvent(func())
+}
+
+func queueOnMain(win fyne.Window, fn func()) {
+	if fn == nil {
+		return
+	}
+
+	if win != nil {
+		if q, ok := win.(queueableWindow); ok {
+			q.QueueEvent(fn)
+			return
+		}
+	}
+
+	if app := fyne.CurrentApp(); app != nil {
+		for _, candidate := range app.Driver().AllWindows() {
+			if q, ok := candidate.(queueableWindow); ok {
+				q.QueueEvent(fn)
+				return
+			}
+		}
+	}
+
+	fn()
 }
 
 func defaultInternationalSelection(countries []string) []string {
