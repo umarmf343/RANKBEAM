@@ -15,6 +15,7 @@ import (
 func main() {
 	var (
 		apiBase    = flag.String("api-base", "", "base URL of the licensing API")
+		apiToken   = flag.String("api-token", "", "optional installer token override")
 		customerID = flag.String("customer", "", "unique customer identifier (email or order number)")
 		outputPath = flag.String("output", "", "optional path to also write the license key to")
 		appID      = flag.String("app-id", "amazon-product-suite", "application identifier used for storage")
@@ -30,7 +31,13 @@ func main() {
 		log.Fatalf("failed to read machine fingerprint: %v", err)
 	}
 
-	client := licenseclient.NewClient(*apiBase)
+	client, err := licenseclient.NewClient(*apiBase)
+	if err != nil {
+		log.Fatalf("failed to create license client: %v", err)
+	}
+	if strings.TrimSpace(*apiToken) != "" {
+		client.WithToken(*apiToken)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 

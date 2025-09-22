@@ -18,6 +18,7 @@ func main() {
 		addr         = flag.String("addr", ":8080", "listen address for the HTTP server")
 		dbPath       = flag.String("db", "licenses.db", "path to the SQLite database")
 		expiryDays   = flag.Int("expiry", 365, "default license validity in days (0 for no expiry)")
+		installerTok = flag.String("token", os.Getenv("LICENSE_API_TOKEN"), "shared installer token (falls back to LICENSE_API_TOKEN)")
 		readTimeout  = flag.Duration("read-timeout", 10*time.Second, "HTTP server read timeout")
 		writeTimeout = flag.Duration("write-timeout", 10*time.Second, "HTTP server write timeout")
 		idleTimeout  = flag.Duration("idle-timeout", 60*time.Second, "HTTP server idle timeout")
@@ -32,6 +33,7 @@ func main() {
 	defer service.Close()
 
 	api := licensing.NewAPI(service)
+	api.SetInstallerToken(*installerTok)
 	mux := http.NewServeMux()
 	api.Register(mux)
 
