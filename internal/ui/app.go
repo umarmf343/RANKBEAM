@@ -20,7 +20,7 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
-    "github.com/umarmf343/Umar-kdp-product-api/internal/scraper"
+	"github.com/umarmf343/Umar-kdp-product-api/internal/scraper"
 )
 
 const requestTimeout = 30 * time.Second
@@ -113,7 +113,7 @@ func buildProductLookupTab(window fyne.Window, service *scraper.Service, countri
 
 			details, err := service.FetchProduct(ctx, asin, country)
 
-			fyne.CurrentApp().Driver().RunOnMain(func() {
+			app.QueueMain(func() {
 				progress.Hide()
 				if err != nil {
 					dialog.ShowError(err, window)
@@ -195,7 +195,7 @@ func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, count
 
 			insights, err := service.KeywordSuggestions(ctx, seed, country, filters)
 
-			fyne.CurrentApp().Driver().RunOnMain(func() {
+			app.QueueMain(func() {
 				progress.Hide()
 				if err != nil {
 					dialog.ShowError(err, window)
@@ -228,7 +228,7 @@ func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, count
 
 			trends, err := service.FetchCategoryTrends(ctx, seed, country)
 
-			fyne.CurrentApp().Driver().RunOnMain(func() {
+			app.QueueMain(func() {
 				progress.Hide()
 				if err != nil {
 					dialog.ShowError(err, window)
@@ -267,7 +267,7 @@ func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, count
 
 			products, err := service.BestsellerAnalysis(ctx, seed, country, filter)
 
-			fyne.CurrentApp().Driver().RunOnMain(func() {
+			app.QueueMain(func() {
 				progress.Hide()
 				if err != nil {
 					dialog.ShowError(err, window)
@@ -369,7 +369,7 @@ func buildCompetitiveTab(window fyne.Window, service *scraper.Service, countries
 
 			insights, err := service.ReverseASINSearch(ctx, asin, country, filters)
 
-			fyne.CurrentApp().Driver().RunOnMain(func() {
+			app.QueueMain(func() {
 				progress.Hide()
 				if err != nil {
 					dialog.ShowError(err, window)
@@ -403,7 +403,7 @@ func buildCompetitiveTab(window fyne.Window, service *scraper.Service, countries
 
 			keywords, err := service.GenerateAMSKeywords(ctx, titleEntry.Text, descriptionEntry.Text, competitors, country)
 
-			fyne.CurrentApp().Driver().RunOnMain(func() {
+			app.QueueMain(func() {
 				progress.Hide()
 				if err != nil {
 					dialog.ShowError(err, window)
@@ -476,7 +476,7 @@ func buildInternationalTab(window fyne.Window, service *scraper.Service, countri
 
 			keywords, err := service.InternationalKeywords(ctx, keyword, selected)
 
-			fyne.CurrentApp().Driver().RunOnMain(func() {
+			app.QueueMain(func() {
 				progress.Hide()
 				if err != nil {
 					dialog.ShowError(err, window)
