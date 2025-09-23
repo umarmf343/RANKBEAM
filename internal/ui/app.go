@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -23,7 +24,10 @@ import (
 	"github.com/umarmf343/Umar-kdp-product-api/internal/scraper"
 )
 
-const requestTimeout = 30 * time.Second
+const (
+	requestTimeout = 30 * time.Second
+	tutorialURL    = "https://www.youtube.com/results?search_query=RankBeam+tutorial"
+)
 
 var activeService *scraper.Service
 
@@ -93,7 +97,24 @@ func loadMainApplication(window fyne.Window, licenseKey string) {
 	)
 	tabs.SetTabLocation(container.TabLocationTop)
 
-	window.SetContent(tabs)
+	tutorialButton := widget.NewButtonWithIcon("Tutorial", tutorialIcon, func() {
+		parsed, err := url.Parse(tutorialURL)
+		if err != nil {
+			dialog.ShowError(fmt.Errorf("open tutorial: %w", err), window)
+			return
+		}
+
+		if app := fyne.CurrentApp(); app != nil {
+			if err := app.OpenURL(parsed); err != nil {
+				dialog.ShowError(fmt.Errorf("open tutorial: %w", err), window)
+			}
+		}
+	})
+	tutorialButton.Importance = widget.HighImportance
+
+	topBar := container.NewPadded(container.NewHBox(layout.NewSpacer(), tutorialButton))
+
+	window.SetContent(container.NewBorder(topBar, nil, nil, nil, tabs))
 
 	title := "RankBeam"
 	if licenseKey != "" {
