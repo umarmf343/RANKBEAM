@@ -1,0 +1,281 @@
+RankBeam Packaging & Licensing Deployment Guide
+=============================================
+
+Paystack Test Credentials
+-------------------------
+Use these sandbox keys while wiring payments to licensing. Replace them with your live keys only after end-to-end tests succeed.
+
+* **Test Secret Key:** `sk_test_7dd51e291a986b6462d0f4198668ce07c296eb5d`
+* **Test Public Key:** `pk_test_511e657a1955822d3f1dc4b231617eae8905c0dc`
+
+1. Verify Required Project Files
+--------------------------------
+Before you start building installers or deploying the server, confirm that the repository contains the following items. Replace or regenerate any file that is missing.
+
+| Purpose | Location | How to (re)create |
+| --- | --- | --- |
+| Windows desktop source | `cmd/app` | Already present. Keep source unmodified when only packaging. |
+| Fingerprint helper source | `cmd/fingerprint-helper` | Run `go build -o bin/fingerprint-helper.exe ./cmd/fingerprint-helper`. |
+| Inno Setup script | `installer/rankbeam.iss` | Provided. Customize macros at the top before compiling. |
+| Application icon (optional) | `assets/app.ico`, `assets/app.png` | Replace with branded artwork if desired. |
+| License server source | `server/` | Builds the Go API for issuing and validating licenses. |
+| Environment template | `server/.env.example` | Copy to `.env` and edit for your deployment. |
+| Paystack webhook sample | `docs/license-system-guide.md` & `serve guide.txt` | Follow the provided JavaScript snippet when creating your webhook app. |
+
+If any of the binaries inside `bin/` are missing, rebuild them with the commands listed below.
+
+2. Prepare Your Build Environment (Windows)
+-------------------------------------------
+Perform these steps once on a clean Windows 10/11 64-bit machine.
+
+1. **Install Go 1.21+ (64-bit)** – download from <https://go.dev/dl/> and verify with `go version`.
+2. **Install MSYS2 & Fyne prerequisites** – follow the instructions in `Installation Guide.txt` to install `mingw-w64-ucrt-x86_64-toolchain`, `pkg-config`, and `gtk3`.
+3. **Install the Fyne CLI** – run `go install fyne.io/fyne/v2/cmd/fyne@latest` in PowerShell.
+4. **Install Inno Setup 6** – download from <https://jrsoftware.org/isdl.php> and run the installer.
+5. **Clone this repository** – `git clone https://github.com/umar02/Umar-kdp-product-api.git`.
+6. **Install Node.js 18+ (optional)** – handy for running the Paystack webhook sample locally.
+
+3. Build the Desktop Executable and Helper
+-----------------------------------------
+All commands run from the project root in PowerShell. Ensure the `bin/` folder exists: `New-Item -ItemType Directory -Force bin`.
+
+```powershell
+# Enable CGO so Fyne can link the native widgets
+$env:CGO_ENABLED = "1"
+
+# Build the Windows desktop executable
+GOOS=windows GOARCH=amd64 go build -o bin/rankbeam.exe ./cmd/app
+
+# Build the fingerprint helper used by the installer
+GOOS=windows GOARCH=amd64 go build -o bin/fingerprint-helper.exe ./cmd/fingerprint-helper
+```
+
+Double-click `bin/rankbeam.exe` to sanity-check the UI. When it opens successfully, close it and continue.
+
+4. Configure the Installer Script
+---------------------------------
+Open `installer/rankbeam.iss` inside Inno Setup. Update the macros at the top to match your environment:
+
+```pascal
+#define LicenseApiBaseUrl "https://licensing.example.com"
+#define LicenseApiToken "YOUR_INSTALLER_SECRET"
+```
+
+* `LicenseApiBaseUrl` – the HTTPS origin of the license server you will deploy on cPanel.
+* `LicenseApiToken` – a shared secret. Set the same value in the server’s environment (`LICENSE_API_TOKEN`).
+
+Save the script after editing. Leave the rest of the code untouched unless you need to change branding, version numbers, or shortcuts.
+
+5. Compile the Installer with Inno Setup
+---------------------------------------
+1. Launch **Inno Setup Compiler**.
+2. Open `installer/rankbeam.iss`.
+3. Confirm the **Files** entries point to the rebuilt binaries inside `bin/`.
+4. Press **F9** or choose **Build → Compile**.
+5. When compilation succeeds, collect `installer\rankbeam-setup.exe`. This is the installer you distribute.
+
+> Tip: If the compiler warns about missing binaries, rebuild them and rerun the compile step.
+
+6. Configure Runtime Licensing in the Desktop App
+-------------------------------------------------
+Before shipping, bake the license API settings into your desktop build so the app can validate keys on launch.
+
+```powershell
+$env:LICENSE_API_URL = "https://licensing.example.com"
+$env:LICENSE_API_TOKEN = "YOUR_INSTALLER_SECRET"
+go build -o bin/rankbeam.exe ./cmd/app
+```
+
+Alternatively, distribute a config file the app reads at runtime. Keep the installer and runtime tokens synchronized.
+
+7. Prepare the License Server for cPanel
+----------------------------------------
+Most shared hosts with cPanel run Linux (CentOS/AlmaLinux/CloudLinux). You will upload a prebuilt Go binary plus support files. Use the test Paystack keys until you are ready for production.
+
+1. **Build a Linux binary locally:**
+   ```bash
+   GOOS=linux GOARCH=amd64 go build -o build/license-server ./server
+   ```
+2. **Stage deployment assets** in a folder named `deploy/license-server`:
+   * `license-server` (the binary from the previous step).
+   * `server/.env.example` copied and renamed to `.env` with real values.
+   * `server/migrations.sql` (not required—database is created automatically).
+   * `docs/license-system-guide.md` (optional reference).
+   * Create an empty `data/` directory (`deploy/license-server/data/`). SQLite will place `licenses.db` here.
+   * Any helper scripts (see steps below for `start.sh` and `stop.sh`).
+
+   Example structure:
+   ```text
+   deploy/license-server/
+     license-server
+     .env
+     data/
+     start.sh
+     stop.sh
+     paystack-webhook.js   (optional Node/Express webhook)
+   ```
+3. **Create service scripts** to simplify restarts:
+   ```bash
+   cat > deploy/license-server/start.sh <<'SH'
+   #!/bin/bash
+   cd "$(dirname "$0")"
+   source ./.env
+   nohup ./license-server >> license.log 2>&1 &
+   echo $! > license.pid
+   SH
+
+   cat > deploy/license-server/stop.sh <<'SH'
+   #!/bin/bash
+   cd "$(dirname "$0")"
+   if [ -f license.pid ]; then
+     kill "$(cat license.pid)" && rm license.pid
+   fi
+   SH
+   chmod +x deploy/license-server/*.sh
+   ```
+4. **Archive the folder** so you can upload it through cPanel File Manager: `tar czf rankbeam-license-server.tar.gz -C deploy license-server`.
+
+8. Deploy the Server on cPanel
+------------------------------
+1. Log in to cPanel and open **File Manager**.
+2. Upload `rankbeam-license-server.tar.gz` into your home directory (e.g., `/home/username/`).
+3. Extract the archive; you should now have `/home/username/license-server/` containing the files created above.
+4. Open **Terminal** or connect over SSH (if enabled).
+5. Run the server:
+   ```bash
+   cd ~/license-server
+   chmod +x license-server start.sh stop.sh
+   ./start.sh
+   tail -f license.log
+   ```
+   You should see `license server listening on :8080`.
+6. **Keep the process alive:**
+   * If your host provides **Supervisor** or **Application Manager**, register `~/license-server/start.sh` as a persistent app.
+   * Otherwise, create a **Cron Job** with the command `@reboot /bin/bash /home/username/license-server/start.sh` to relaunch after reboots. Some shared hosts kill long-running binaries; confirm with your provider that background daemons are allowed.
+7. **Expose HTTPS:**
+   * Use the **Domain Manager** to create a subdomain such as `licensing.yourdomain.com` pointing to your account.
+   * In **Zone Editor**, add an `A` record for the subdomain to the hosting server.
+   * In **SSL/TLS Status**, issue an AutoSSL certificate for the new subdomain.
+   * In **Domains → Redirects**, route HTTPS traffic to the app by creating an `.htaccess` reverse proxy inside the subdomain’s document root:
+     ```apacheconf
+     RewriteEngine On
+     RewriteCond %{REQUEST_FILENAME} !-f
+     RewriteRule ^(.*)$ http://127.0.0.1:8080/$1 [P,L]
+     ```
+     Many hosts require enabling **Apache mod_proxy**; if it is unavailable, use a small Node or PHP script to proxy requests.
+8. **Load environment variables:**
+   Edit `~/license-server/.env` with values from `server/.env.example`:
+   ```dotenv
+   LICENSE_BIND_ADDR=:8080
+   LICENSE_DB_PATH=/home/username/license-server/data/licenses.db
+   LICENSE_API_TOKEN=choose-a-strong-token
+   PAYSTACK_SECRET=sk_test_7dd51e291a986b6462d0f4198668ce07c296eb5d
+   PAYSTACK_PUBLIC=pk_test_511e657a1955822d3f1dc4b231617eae8905c0dc
+   LICENSE_API_URL=https://licensing.yourdomain.com
+   ```
+   Reload the server (`./stop.sh && ./start.sh`) after edits.
+
+9. Implement the Paystack → License Flow
+----------------------------------------
+1. **Create a webhook endpoint** using any language your host supports. If Node.js is available, adapt the sample from `serve guide.txt`:
+   ```bash
+   cd ~/license-server
+   mkdir -p webhook && cd webhook
+   npm init -y
+   npm install express axios crypto dotenv
+   cat > paystack-webhook.js <<'JS'
+   require('dotenv').config();
+   const express = require('express');
+   const crypto = require('crypto');
+   const axios = require('axios');
+
+   const app = express();
+   app.use(express.json({ verify: (req, res, buf) => { req.rawBody = buf; } }));
+
+   const { PAYSTACK_SECRET, LICENSE_API_URL, LICENSE_API_TOKEN } = process.env;
+
+   function isValidSignature(req) {
+     const signature = req.headers['x-paystack-signature'];
+     const hash = crypto.createHmac('sha512', PAYSTACK_SECRET)
+       .update(req.rawBody)
+       .digest('hex');
+     return signature && signature === hash;
+   }
+
+   app.post('/webhooks/paystack', async (req, res) => {
+     if (!isValidSignature(req)) return res.status(401).send('invalid signature');
+     const event = req.body;
+     if (event.event !== 'charge.success') return res.sendStatus(200);
+
+     const email = event.data.customer.email;
+     const fingerprintField = event.data.metadata?.custom_fields?.find(f => f.variable_name === 'fingerprint');
+     if (!fingerprintField?.value) return res.sendStatus(200);
+
+     try {
+       const { data } = await axios.post(
+         `${LICENSE_API_URL}/api/v1/licenses`,
+         { customerId: email, fingerprint: fingerprintField.value },
+         { headers: { 'X-Installer-Token': LICENSE_API_TOKEN } }
+       );
+       console.log('Issued license', data.licenseKey, 'to', email);
+     } catch (err) {
+       console.error('License issuance failed', err.response?.data || err.message);
+     }
+     res.sendStatus(200);
+   });
+
+   const port = process.env.PORT || 3000;
+   app.listen(port, () => console.log(`Paystack webhook listening on ${port}`));
+   JS
+   ```
+2. **Create a Node.js app** in cPanel (Setup Node.js App) pointing to `webhook/paystack-webhook.js`, or run it manually from the license-server directory with `node webhook/paystack-webhook.js`. Ensure the webhook app shares the same `.env` file as the license server so the Paystack keys and license token match.
+3. **Register the webhook URL** in the Paystack dashboard (e.g., `https://licensing.yourdomain.com/webhooks/paystack`).
+4. **Embed the Paystack Inline checkout** on your website with the test public key:
+   ```html
+   <script src="https://js.paystack.co/v1/inline.js"></script>
+   <button onclick="payWithPaystack()">Buy RankBeam</button>
+   <script>
+   function payWithPaystack() {
+     const handler = PaystackPop.setup({
+       key: 'pk_test_511e657a1955822d3f1dc4b231617eae8905c0dc',
+       email: document.querySelector('#email').value,
+       amount: 750000,
+       metadata: {
+         custom_fields: [{
+           display_name: 'Fingerprint',
+           variable_name: 'fingerprint',
+           value: document.querySelector('#fingerprint').value
+         }]
+       },
+       callback: function(response) {
+         alert('Payment reference: ' + response.reference);
+       }
+     });
+     handler.openIframe();
+   }
+   </script>
+   ```
+5. **Verify transactions manually (optional):** Call `https://api.paystack.co/transaction/verify/{reference}` with the secret key before issuing a license if you prefer polling instead of webhooks.
+
+10. Test the End-to-End Flow
+----------------------------
+1. **Installer test**
+   * Run `rankbeam-setup.exe` on a Windows test VM.
+   * Enter an email and complete installation. The wizard should contact `https://licensing.yourdomain.com/api/v1/licenses` and show the issued key.
+2. **Desktop validation**
+   * Launch the installed app. It should validate the saved key automatically using the same API token.
+3. **Paystack webhook test**
+   * Using Paystack’s test mode, complete a checkout with `4242 4242 4242 4242`, `123`, and any future expiry.
+   * Confirm the webhook logs show a license issuance and that the SQLite database (`data/licenses.db`) contains the new row.
+4. **Re-run the installer** on the same machine – the API should return the existing key.
+5. **Attempt validation with the wrong fingerprint** – it should fail with HTTP 401.
+
+11. Promote to Production
+-------------------------
+1. Swap the Paystack keys in `.env` with your live credentials.
+2. Update DNS if you are moving from a staging domain to production.
+3. Rebuild the desktop executable and installer with the final API URL/token.
+4. Sign the installer with Authenticode if you have a code-signing certificate.
+5. Update your Paystack webhook endpoint to the production URL.
+
+You now have a repeatable workflow for compiling the RankBeam desktop app, packaging it with Inno Setup, deploying the license API on cPanel, and verifying licenses automatically after Paystack payments.
