@@ -60,10 +60,10 @@ begin
     case Ch of
       '"': Result := Result + '\\"';
       '\\': Result := Result + '\\\\';
-      #8: Result := Result + '\\b';
-      #9: Result := Result + '\\t';
-      #10: Result := Result + '\\n';
-      #13: Result := Result + '\\r';
+      Chr(8): Result := Result + '\\b';
+      Chr(9): Result := Result + '\\t';
+      Chr(10): Result := Result + '\\n';
+      Chr(13): Result := Result + '\\r';
     else
       Result := Result + Ch;
     end;
