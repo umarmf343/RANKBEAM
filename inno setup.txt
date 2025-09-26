@@ -57,12 +57,34 @@ Double-click `bin/rankbeam.exe` to sanity-check the UI. When it opens successful
 Open `installer/rankbeam.iss` inside Inno Setup. Update the macros at the top to match your environment:
 
 ```pascal
-#define LicenseApiBaseUrl "https://licensing.example.com"
+#define LicenseApiBaseUrl "https://rankbeam.hannyshive.com.ng"
 #define LicenseApiToken "YOUR_INSTALLER_SECRET"
 ```
 
 * `LicenseApiBaseUrl` – the HTTPS origin of the license server you will deploy on cPanel.
 * `LicenseApiToken` – a shared secret. Set the same value in the server’s environment (`LICENSE_API_TOKEN`).
+
+### Generate a strong installer token
+
+Use a cryptographically secure random string rather than a short passphrase. Generate the value once, keep it private, and
+re-use it for both the installer macro and the server environment variable.
+
+* **Windows PowerShell**
+  ```powershell
+  # 32 bytes of randomness, hex encoded (64 characters)
+  $bytes = [byte[]](1..32 | ForEach-Object { Get-Random -Minimum 0 -Maximum 256 })
+  $token = [System.Convert]::ToHexString($bytes)
+  $token
+  ```
+* **macOS/Linux (or Windows with Git Bash)**
+  ```bash
+  openssl rand -hex 32
+  ```
+
+Copy the output into both `installer/rankbeam.iss` and `server/.env` (`LICENSE_API_TOKEN=...`). The installer must be recompiled
+after you change the macro so the new token is baked into the setup executable. If the Inno Setup compiler reports `unknown
+processor directive` near the `#define` lines, verify that you are using Inno Setup 6 or newer and that the lines start with
+the `#` character (do not replace the `#define` statements with `LicenseApiBaseUrl:` style assignments).
 
 Save the script after editing. Leave the rest of the code untouched unless you need to change branding, version numbers, or shortcuts.
 
