@@ -207,13 +207,10 @@ begin
       GeneratedLicenseKey := ActivateLicense();
       ActivationFailed := False;
     except
-      on E: Exception do
-      begin
-        ActivationFailed := True;
-        GeneratedLicenseKey := '';
-        SuppressibleMsgBox('License activation failed:\n\n' + E.Message + '\n\nYou can rerun the installer or contact support to complete activation.',
-          mbError, MB_OK, IDOK);
-      end;
+      ActivationFailed := True;
+      GeneratedLicenseKey := '';
+      SuppressibleMsgBox('License activation failed:\n\n' + GetExceptionMessage + '\n\nYou can rerun the installer or contact support to complete activation.',
+        mbError, MB_OK, IDOK);
     end;
   end;
 end;
