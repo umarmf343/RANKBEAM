@@ -1,5 +1,5 @@
 #define LicenseApiBaseUrl "https://rankbeam.hannyshive.com.ng"
-#define LicenseApiToken "REPLACE_WITH_INSTALLER_SECRET"
+#define LicenseApiToken "F6BFD62E2CD91CED258005CBDE1FED2423DBD8775F2430A75F882CDF3ADC6750"
 #define LicenseStorageSubDir "RankBeam"
 #define LicenseFileName "license.key"
 
