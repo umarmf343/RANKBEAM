@@ -112,17 +112,17 @@ begin
   if not Exec(ExpandConstant('{tmp}') + '\\fingerprint-helper.exe', '--output ' + AddQuotes(OutputPath), '', SW_HIDE,
     ewWaitUntilTerminated, ResultCode) then
   begin
-    raise Exception.Create('Unable to start fingerprint helper.');
+    RaiseException('Unable to start fingerprint helper.');
   end;
   if ResultCode <> 0 then
-    raise Exception.Create('Fingerprint helper exited with code ' + IntToStr(ResultCode) + '.');
+    RaiseException('Fingerprint helper exited with code ' + IntToStr(ResultCode) + '.');
 
   if not LoadStringFromFile(OutputPath, Output) then
-    raise Exception.Create('Failed to read fingerprint output.');
+    RaiseException('Failed to read fingerprint output.');
 
   Result := Trim(Output);
   if Result = '' then
-    raise Exception.Create('Fingerprint helper returned an empty fingerprint.');
+    RaiseException('Fingerprint helper returned an empty fingerprint.');
 
   Log(Format('Derived machine fingerprint %s', [Result]));
 end;
@@ -135,7 +135,7 @@ var
 begin
   Email := GetCustomerEmail();
   if Email = '' then
-    raise Exception.Create('Email address is required for license activation.');
+    RaiseException('Email address is required for license activation.');
 
   Url := '{#LicenseApiBaseUrl}/api/v1/licenses';
   Payload := '{"customerId":"' + EscapeJson(Email) + '","fingerprint":"' + EscapeJson(Fingerprint) + '"}';
@@ -151,7 +151,7 @@ begin
   Status := WinHttpReq.Status;
   Log(Format('License server responded with %d', [Status]));
   if (Status <> 200) and (Status <> 201) then
-    raise Exception.CreateFmt('License request failed (%d): %s', [Status, WinHttpReq.ResponseText]);
+    RaiseException(Format('License request failed (%d): %s', [Status, WinHttpReq.ResponseText]));
 
   Result := WinHttpReq.ResponseText;
 end;
@@ -165,10 +165,10 @@ begin
   if not DirExists(StorageDir) then
   begin
     if not ForceDirectories(StorageDir) then
-      raise Exception.Create('Unable to create directory for license key at ' + StorageDir);
+      RaiseException('Unable to create directory for license key at ' + StorageDir);
   end;
   if not SaveStringToFile(StoragePath, Key, False) then
-    raise Exception.Create('Unable to write license key to ' + StoragePath);
+    RaiseException('Unable to write license key to ' + StoragePath);
   Log('Stored license key at ' + StoragePath);
 end;
 
@@ -186,7 +186,7 @@ begin
   Response := RequestLicenseFromServer(Fingerprint);
   Key := ExtractJsonValue(Response, 'licenseKey');
   if Key = '' then
-    raise Exception.Create('License server response did not include a license key.');
+    RaiseException('License server response did not include a license key.');
   PersistLicenseKey(Key);
   ShowLicenseKey(Key);
   Result := Key;
