@@ -94,6 +94,47 @@ begin
   Result := Copy(Tail, 1, EndPos - 1);
 end;
 
+function StripHtmlTags(const Value: string): string;
+var
+  I: Integer;
+  InTag: Boolean;
+  Ch: Char;
+begin
+  Result := '';
+  InTag := False;
+  for I := 1 to Length(Value) do
+  begin
+    Ch := Value[I];
+    case Ch of
+      '<': InTag := True;
+      '>':
+        if InTag then
+          InTag := False
+        else
+          Result := Result + Ch;
+    else
+      if not InTag then
+        Result := Result + Ch;
+    end;
+  end;
+  Result := Trim(Result);
+end;
+
+function FormatErrorResponse(const ResponseText: string): string;
+var
+  Sanitized: string;
+begin
+  Sanitized := StripHtmlTags(ResponseText);
+  if Sanitized = '' then
+    Result := 'The activation server returned no additional details.'
+  else
+  begin
+    if Length(Sanitized) > 200 then
+      Sanitized := Copy(Sanitized, 1, 200) + '…';
+    Result := Sanitized;
+  end;
+end;
+
 function GetCustomerEmail(): string;
 begin
   Result := Trim(CustomerInfoPage.Values[0]);
@@ -151,7 +192,7 @@ begin
   Status := WinHttpReq.Status;
   Log(Format('License server responded with %d', [Status]));
   if (Status <> 200) and (Status <> 201) then
-    RaiseException(Format('License request failed (%d): %s', [Status, WinHttpReq.ResponseText]));
+    RaiseException(Format('License request failed (%d): %s', [Status, FormatErrorResponse(WinHttpReq.ResponseText)]));
 
   Result := WinHttpReq.ResponseText;
 end;
