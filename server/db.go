@@ -16,7 +16,10 @@ import (
 var (
 	ErrLicenseNotFound     = errors.New("license: not found")
 	ErrFingerprintMismatch = errors.New("license: fingerprint mismatch")
+	ErrLicenseExpired      = errors.New("license: expired")
 )
+
+const licenseValidity = 30 * 24 * time.Hour
 
 type License struct {
 	Key             string
@@ -66,7 +69,24 @@ CREATE TABLE IF NOT EXISTS licenses (
 
 func (s *LicenseStore) CreateLicense(ctx context.Context, customerID, fingerprintHash string) (*License, bool, error) {
 	if existing, err := s.FindByFingerprint(ctx, fingerprintHash); err == nil {
-		return existing, false, nil
+		now := time.Now().UTC()
+		if now.Sub(existing.CreatedAt) < licenseValidity {
+			return existing, false, nil
+		}
+
+		key, err := GenerateLicenseKey(customerID, fingerprintHash)
+		if err != nil {
+			return nil, false, err
+		}
+		_, err = s.db.ExecContext(ctx,
+			`UPDATE licenses SET key = ?, customer_id = ?, created_at = ? WHERE fingerprint_hash = ?`,
+			key, customerID, now, fingerprintHash,
+		)
+		if err != nil {
+			return nil, false, fmt.Errorf("update license: %w", err)
+		}
+
+		return &License{Key: key, FingerprintHash: fingerprintHash, CustomerID: customerID, CreatedAt: now}, true, nil
 	} else if !errors.Is(err, ErrLicenseNotFound) {
 		return nil, false, err
 	}
@@ -127,6 +147,9 @@ func (s *LicenseStore) ValidateLicense(ctx context.Context, key, fingerprintHash
 	}
 	if lic.FingerprintHash != fingerprintHash {
 		return nil, ErrFingerprintMismatch
+	}
+	if time.Now().UTC().Sub(lic.CreatedAt) >= licenseValidity {
+		return nil, ErrLicenseExpired
 	}
 	return lic, nil
 }

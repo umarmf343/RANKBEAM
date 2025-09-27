@@ -91,6 +91,8 @@ func (h *LicenseHandler) ValidateLicense(w http.ResponseWriter, r *http.Request)
 			http.Error(w, "license not found", http.StatusUnauthorized)
 		case errors.Is(err, ErrFingerprintMismatch):
 			http.Error(w, "fingerprint mismatch", http.StatusUnauthorized)
+		case errors.Is(err, ErrLicenseExpired):
+			http.Error(w, "license expired", http.StatusUnauthorized)
 		default:
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
