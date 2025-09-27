@@ -21,6 +21,7 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
+	"github.com/umarmf343/Umar-kdp-product-api/assets"
 	"github.com/umarmf343/Umar-kdp-product-api/internal/scraper"
 )
 
@@ -36,6 +37,10 @@ func Run() {
 	application := app.NewWithID("rankbeam")
 	application.Settings().SetTheme(theme.LightTheme())
 
+	if icon := assets.AppIcon(); icon != nil {
+		application.SetIcon(icon)
+	}
+
 	if lifecycle := application.Lifecycle(); lifecycle != nil {
 		lifecycle.SetOnStopped(func() {
 			if activeService != nil {
@@ -45,6 +50,9 @@ func Run() {
 	}
 
 	window := application.NewWindow("RankBeam")
+	if icon := assets.AppIcon(); icon != nil {
+		window.SetIcon(icon)
+	}
 	window.Resize(fyne.NewSize(1024, 720))
 	window.SetMaster()
 
