@@ -18,7 +18,6 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
-	"github.com/umarmf343/Umar-kdp-product-api/assets"
 	"github.com/umarmf343/Umar-kdp-product-api/internal/license"
 )
 
@@ -79,8 +78,6 @@ func renderLicenseFailure(window fyne.Window, client *license.Client, message st
 		}
 	}
 
-	heroImage := buildHeroImage()
-
 	ctaURL, _ := url.Parse("https://rankbeam.hannyshive.com.ng/")
 	ctaButton := widget.NewButtonWithIcon("Get Your License", theme.MailComposeIcon(), func() {
 		if fyne.CurrentApp() != nil {
@@ -105,7 +102,7 @@ func renderLicenseFailure(window fyne.Window, client *license.Client, message st
 	var activationInProgress bool
 
 	updateSubmitButtonState := func() {
-		if activationInProgress || client == nil || strings.TrimSpace(licenseEntry.Text) == "" {
+		if activationInProgress || strings.TrimSpace(licenseEntry.Text) == "" {
 			submitButton.Disable()
 			return
 		}
@@ -116,12 +113,7 @@ func renderLicenseFailure(window fyne.Window, client *license.Client, message st
 		updateSubmitButtonState()
 	}
 
-	if client == nil {
-		submitButton.Disable()
-		statusLabel.SetText("Activation is unavailable until the license server settings are configured. Contact support for assistance.")
-	} else {
-		updateSubmitButtonState()
-	}
+	updateSubmitButtonState()
 
 	submitButton.OnTapped = func() {
 		if client == nil {
@@ -156,6 +148,13 @@ func renderLicenseFailure(window fyne.Window, client *license.Client, message st
 					activationInProgress = false
 					updateSubmitButtonState()
 					statusLabel.SetText(activationErrorMessage(err))
+					if errors.Is(err, license.ErrInvalidLicense) {
+						if fyne.CurrentApp() != nil {
+							if openErr := fyne.CurrentApp().OpenURL(ctaURL); openErr != nil {
+								dialog.ShowError(openErr, window)
+							}
+						}
+					}
 					return
 				}
 				statusLabel.SetText("License activated. Summoning the intelligence suite…")
@@ -195,10 +194,7 @@ func renderLicenseFailure(window fyne.Window, client *license.Client, message st
 		container.NewMax(heroBackground, container.NewPadded(marketingPanel)),
 	)
 
-	galleryCard := widget.NewCard("Preview The Interface", "A high-velocity cockpit for elite Amazon strategists.", container.NewPadded(heroImage))
-
-	content := container.NewAdaptiveGrid(2, marketingCard, galleryCard)
-	window.SetContent(container.NewPadded(content))
+	window.SetContent(container.NewPadded(marketingCard))
 }
 
 func activationErrorMessage(err error) string {
@@ -218,25 +214,6 @@ func activationErrorMessage(err error) string {
 	default:
 		return fmt.Sprintf("Activation failed: %v", err)
 	}
-}
-
-func buildHeroImage() fyne.CanvasObject {
-	resource := assets.AppScreenshot()
-	if resource != nil {
-		image := canvas.NewImageFromResource(resource)
-		image.FillMode = canvas.ImageFillContain
-		image.SetMinSize(fyne.NewSize(42, 32))
-		return image
-	}
-
-	backdrop := canvas.NewRectangle(color.NRGBA{R: 30, G: 41, B: 59, A: 255})
-	backdrop.SetMinSize(fyne.NewSize(42, 32))
-
-	caption := canvas.NewText("Interface preview unavailable", color.NRGBA{R: 255, G: 255, B: 255, A: 255})
-	caption.Alignment = fyne.TextAlignCenter
-	caption.TextSize = 18
-
-	return container.NewMax(backdrop, container.NewCenter(caption))
 }
 
 func summarizeKey(key string) string {
