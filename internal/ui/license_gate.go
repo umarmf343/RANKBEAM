@@ -102,9 +102,25 @@ func renderLicenseFailure(window fyne.Window, client *license.Client, message st
 	submitButton := widget.NewButtonWithIcon("Activate & Launch", theme.ConfirmIcon(), nil)
 	submitButton.Importance = widget.HighImportance
 
+	var activationInProgress bool
+
+	updateSubmitButtonState := func() {
+		if activationInProgress || client == nil || strings.TrimSpace(licenseEntry.Text) == "" {
+			submitButton.Disable()
+			return
+		}
+		submitButton.Enable()
+	}
+
+	licenseEntry.OnChanged = func(string) {
+		updateSubmitButtonState()
+	}
+
 	if client == nil {
 		submitButton.Disable()
 		statusLabel.SetText("Activation is unavailable until the license server settings are configured. Contact support for assistance.")
+	} else {
+		updateSubmitButtonState()
 	}
 
 	submitButton.OnTapped = func() {
@@ -119,7 +135,8 @@ func renderLicenseFailure(window fyne.Window, client *license.Client, message st
 			return
 		}
 
-		submitButton.Disable()
+		activationInProgress = true
+		updateSubmitButtonState()
 		statusLabel.SetText("Validating your license with the command server…")
 
 		go func() {
@@ -136,7 +153,8 @@ func renderLicenseFailure(window fyne.Window, client *license.Client, message st
 
 			queueOnMain(window, func() {
 				if err != nil {
-					submitButton.Enable()
+					activationInProgress = false
+					updateSubmitButtonState()
 					statusLabel.SetText(activationErrorMessage(err))
 					return
 				}
@@ -207,12 +225,12 @@ func buildHeroImage() fyne.CanvasObject {
 	if resource != nil {
 		image := canvas.NewImageFromResource(resource)
 		image.FillMode = canvas.ImageFillContain
-		image.SetMinSize(fyne.NewSize(420, 320))
+		image.SetMinSize(fyne.NewSize(42, 32))
 		return image
 	}
 
 	backdrop := canvas.NewRectangle(color.NRGBA{R: 30, G: 41, B: 59, A: 255})
-	backdrop.SetMinSize(fyne.NewSize(420, 320))
+	backdrop.SetMinSize(fyne.NewSize(42, 32))
 
 	caption := canvas.NewText("Interface preview unavailable", color.NRGBA{R: 255, G: 255, B: 255, A: 255})
 	caption.Alignment = fyne.TextAlignCenter
