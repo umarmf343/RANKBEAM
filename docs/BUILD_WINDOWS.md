@@ -6,7 +6,7 @@ This repository now contains a Go/Fyne desktop application that wraps the scrapi
 
 - Go **1.23** or newer installed locally. The module enables the Go **1.24.3** toolchain via `go.mod`, so using an older Go release will trigger an automatic download of that toolchain as long as your base installation is 64-bit and recent enough to understand the [`toolchain`](https://go.dev/doc/toolchain) directive. Confirm `go env GOARCH` reports `amd64`; the GUI cannot be built with 32-bit toolchains.
 - The [Fyne prerequisites](https://docs.fyne.io/started/) for your target platform. For Windows cross-compilation from Linux you also need a MinGW toolchain (`x86_64-w64-mingw32-gcc`).
-- The Fyne CLI, installed with `go install fyne.io/fyne/v2/cmd/fyne@latest` (ensure `$(go env GOPATH)/bin` is on your `PATH`).
+- The Fyne CLI, installed with `go install fyne.io/fyne/v2/cmd/fyne@latest`. On Windows ensure `%USERPROFILE%\go\bin` is on your `PATH` (Command Prompt: `setx PATH "%PATH%;%USERPROFILE%\go\bin"`; PowerShell: `[Environment]::SetEnvironmentVariable("PATH", $env:PATH + ";$env:USERPROFILE\go\bin", "User")`).
 - Git and make (optional but convenient).
 - Inno Setup 6 (for building the installer) if you are on Windows.
 
@@ -39,6 +39,8 @@ fyne package -os windows -icon assets/app.png \
   -executable bin/rankbeam.exe \
   -release
 ```
+
+If you are running these commands directly inside a Windows Command Prompt, remember that environment variables use `set`/`setx` rather than the PowerShell `$env:` syntax. For example, enable CGO with `set CGO_ENABLED=1` before invoking `fyne package`. In PowerShell the equivalent command is `$env:CGO_ENABLED = "1"`.
 
 The two `go build` commands place the artifacts where the installer expects them (`bin/`). The optional `fyne package` command generates a redistributable `.exe` with icons and metadata in the `dist/` directory; pass `-release` to strip debug information and reduce the binary size.
 
