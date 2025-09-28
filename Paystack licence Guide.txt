@@ -1,0 +1,94 @@
+# Paystack Subscription Licensing Guide
+
+This document explains how the refreshed licensing service issues and validates time-limited keys through Paystack subscription payments. It covers the data flow, how to run the Go service locally, and what operations staff must do to keep the workflow healthy.
+
+## 1. System Overview
+
+1. A customer subscribes via Paystack to the monthly product plan.
+2. Paystack notifies the server by invoking the `/api/v1/paystack/webhook` endpoint.
+3. The server verifies the webhook signature, generates a 30-day license key, stores it in SQLite, and responds with the key/expiry payload.
+4. The desktop installer calls `/api/v1/licenses/validate` with the key plus the purchaser's email. The server checks the expiry timestamp and email match before granting access.
+5. Paystack sends another webhook whenever a subscription renews, repeating step 3 and issuing a fresh key.
+
+The license key format is `emailHash + referenceHash + "-" + expiryDate` (e.g. `3adf19e75290fa83d12c-2025-10-01`). Each component is deterministic so that repeat webhooks for the same payment reuse the same key safely.
+
+## 2. Configuring Paystack
+
+1. Log into your Paystack dashboard and create a **Subscription Plan** for the product (e.g. monthly ₦6,500).
+2. Under **Settings → API Keys & Webhooks**, copy the **Secret Key**. Store it as the `PAYSTACK_SECRET_KEY` in your infrastructure (you will use it when creating payment links through your frontend or desktop app).
+3. Generate a **Webhook Signing Secret**. Paystack signs webhook payloads using your secret key—reuse the Secret Key or create a dedicated secret. Save it as `PAYSTACK_WEBHOOK_SECRET` in the server environment.
+4. Configure the webhook URL in Paystack to point at `https://<your-domain>/api/v1/paystack/webhook`.
+5. Ensure Paystack webhooks include the customer email in `data.customer.email`. That field is required to bind the license to the purchaser.
+
+## 3. Server Environment Variables
+
+| Variable | Description |
+| --- | --- |
+| `LICENSE_BIND_ADDR` | Optional. Custom host:port for the Go HTTP server (defaults to `:8080`). |
+| `LICENSE_DB_PATH` | Optional. Path to the SQLite database file (defaults to `data/licenses.db`). |
+| `LICENSE_API_TOKEN` | Optional. Shared secret that clients must send in `X-Installer-Token` when calling `/api/v1/licenses/validate`. Leave empty to disable token auth. |
+| `PAYSTACK_WEBHOOK_SECRET` | Required in production. Secret used to verify Paystack webhook signatures. |
+
+## 4. Running the Server Locally
+
+```bash
+# Install Go 1.20+ and make sure you have gcc available (modernc sqlite driver compiles C code on first run)
+export LICENSE_DB_PATH="/tmp/licenses.db"
+export PAYSTACK_WEBHOOK_SECRET="dev-secret"
+export LICENSE_API_TOKEN="dev-installer-token"
+go run ./server
+```
+
+The server listens on `http://localhost:8080`. Use `curl` to simulate webhooks:
+
+```bash
+body='{"event":"charge.success","data":{"reference":"TEST123","paid_at":"2024-12-01T10:30:00Z","customer":{"email":"user@example.com"}}}}'
+mac=$(echo -n "$body" | openssl dgst -sha512 -hmac "$PAYSTACK_WEBHOOK_SECRET" | cut -d' ' -f2)
+curl -i -X POST http://localhost:8080/api/v1/paystack/webhook \ 
+  -H "Content-Type: application/json" \ 
+  -H "x-paystack-signature: $mac" \ 
+  --data "$body"
+```
+
+Validate the issued key:
+
+```bash
+curl -i -X POST http://localhost:8080/api/v1/licenses/validate \ 
+  -H "Content-Type: application/json" \ 
+  -H "X-Installer-Token: $LICENSE_API_TOKEN" \ 
+  --data '{"licenseKey":"<returned-key>","email":"user@example.com"}'
+```
+
+## 5. Database Schema & Storage
+
+* Table `licenses`
+  * `key` – Primary key license string returned to clients.
+  * `customer_email` – Lower-cased Paystack customer email.
+  * `transaction_ref` – Paystack transaction reference.
+  * `expires_at` – UTC timestamp 30 days after payment.
+  * `created_at` – UTC timestamp when record was inserted.
+* Index: `idx_licenses_email` for efficient lookups by email if future reporting endpoints need it.
+* The `CreateLicense` helper is idempotent: if Paystack retries the same webhook, the server returns the existing row instead of failing the request.
+
+## 6. Operational Checklist
+
+1. **Backups** – Schedule nightly backups of the SQLite database or migrate to a managed relational database if concurrency grows.
+2. **Monitoring** – Instrument HTTP metrics (e.g. use nginx/ALB logs) to watch webhook response codes. A spike in 4xx/5xx indicates signature or DB issues.
+3. **Rotate Secrets** – Update `PAYSTACK_WEBHOOK_SECRET` periodically. When rotated, update the Paystack dashboard and restart the server with the new value.
+4. **Email Delivery** – Configure an external service (e.g. Amazon SES, SendGrid) to mail license keys after webhook success. Hook into the webhook handler after `CreateLicense` to send the message asynchronously.
+5. **Client Updates** – Ensure the desktop app collects the purchaser's email and license key, includes the installer token header (if enabled), and gracefully handles `401` responses by prompting the user to renew.
+
+## 7. Manual Recovery Steps
+
+* To manually revoke a license, delete the row from the `licenses` table identified by the license key.
+* To issue a one-off replacement, insert a new row with a custom expiry using `sqlite3 licenses.db "INSERT ..."` and email the key to the customer.
+* If Paystack is down, you can temporarily extend a user's access by updating `expires_at` for their key while communicating the temporary measure to the customer.
+
+## 8. Next Actions After Deployment
+
+1. Deploy the updated Go service to your production environment.
+2. Update the desktop/CLI installer so that it hits the new `/api/v1/licenses/validate` endpoint with email + key + optional installer token.
+3. Integrate Paystack subscription checkout into your purchase flow, ensuring the customer's email is captured and sent in the metadata.
+4. Implement the email notification step using your chosen mail provider.
+5. Test end-to-end in a Paystack test environment before switching to live keys.
+

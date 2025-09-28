@@ -14,18 +14,19 @@ import (
 )
 
 var (
-	ErrLicenseNotFound     = errors.New("license: not found")
-	ErrFingerprintMismatch = errors.New("license: fingerprint mismatch")
-	ErrLicenseExpired      = errors.New("license: expired")
+	ErrLicenseNotFound = errors.New("license: not found")
+	ErrEmailMismatch   = errors.New("license: email mismatch")
+	ErrLicenseExpired  = errors.New("license: expired")
 )
 
 const licenseValidity = 30 * 24 * time.Hour
 
 type License struct {
-	Key             string
-	FingerprintHash string
-	CustomerID      string
-	CreatedAt       time.Time
+	Key            string
+	CustomerEmail  string
+	TransactionRef string
+	ExpiresAt      time.Time
+	CreatedAt      time.Time
 }
 
 type LicenseStore struct {
@@ -56,10 +57,12 @@ func (s *LicenseStore) migrate(ctx context.Context) error {
 	schema := `
 CREATE TABLE IF NOT EXISTS licenses (
     key TEXT PRIMARY KEY,
-    fingerprint_hash TEXT NOT NULL UNIQUE,
-    customer_id TEXT NOT NULL,
+    customer_email TEXT NOT NULL,
+    transaction_ref TEXT NOT NULL,
+    expires_at TIMESTAMP NOT NULL,
     created_at TIMESTAMP NOT NULL
 );
+CREATE INDEX IF NOT EXISTS idx_licenses_email ON licenses(customer_email);
 `
 	if _, err := s.db.ExecContext(ctx, schema); err != nil {
 		return fmt.Errorf("migrate schema: %w", err)
@@ -67,71 +70,39 @@ CREATE TABLE IF NOT EXISTS licenses (
 	return nil
 }
 
-func (s *LicenseStore) CreateLicense(ctx context.Context, customerID, fingerprintHash string) (*License, bool, error) {
-	if existing, err := s.FindByFingerprint(ctx, fingerprintHash); err == nil {
-		now := time.Now().UTC()
-		if now.Sub(existing.CreatedAt) < licenseValidity {
-			return existing, false, nil
-		}
-
-		key, err := GenerateLicenseKey(customerID, fingerprintHash)
-		if err != nil {
-			return nil, false, err
-		}
-		_, err = s.db.ExecContext(ctx,
-			`UPDATE licenses SET key = ?, customer_id = ?, created_at = ? WHERE fingerprint_hash = ?`,
-			key, customerID, now, fingerprintHash,
-		)
-		if err != nil {
-			return nil, false, fmt.Errorf("update license: %w", err)
-		}
-
-		return &License{Key: key, FingerprintHash: fingerprintHash, CustomerID: customerID, CreatedAt: now}, true, nil
-	} else if !errors.Is(err, ErrLicenseNotFound) {
-		return nil, false, err
-	}
-
-	key, err := GenerateLicenseKey(customerID, fingerprintHash)
+func (s *LicenseStore) CreateLicense(ctx context.Context, email, reference string, expiresAt time.Time) (*License, bool, error) {
+	key, err := GenerateLicenseKey(email, reference, expiresAt)
 	if err != nil {
 		return nil, false, err
 	}
+
 	now := time.Now().UTC()
+	email = strings.TrimSpace(strings.ToLower(email))
+	expiresAt = expiresAt.UTC()
 	_, err = s.db.ExecContext(ctx,
-		`INSERT INTO licenses(key, fingerprint_hash, customer_id, created_at) VALUES(?, ?, ?, ?)`,
-		key, fingerprintHash, customerID, now,
+		`INSERT INTO licenses(key, customer_email, transaction_ref, expires_at, created_at) VALUES(?, ?, ?, ?, ?)`,
+		key, email, strings.TrimSpace(reference), expiresAt, now,
 	)
 	if err != nil {
-		if sqliteIsConstraint(err) {
-			if existing, findErr := s.FindByFingerprint(ctx, fingerprintHash); findErr == nil {
-				return existing, false, nil
+		if isUniqueConstraint(err) {
+			existing, findErr := s.FindByKey(ctx, key)
+			if findErr != nil {
+				return nil, false, fmt.Errorf("lookup existing license: %w", findErr)
 			}
+			return existing, false, nil
 		}
 		return nil, false, fmt.Errorf("insert license: %w", err)
 	}
 
-	return &License{Key: key, FingerprintHash: fingerprintHash, CustomerID: customerID, CreatedAt: now}, true, nil
-}
-
-func (s *LicenseStore) FindByFingerprint(ctx context.Context, fingerprintHash string) (*License, error) {
-	row := s.db.QueryRowContext(ctx,
-		`SELECT key, fingerprint_hash, customer_id, created_at FROM licenses WHERE fingerprint_hash = ?`, fingerprintHash,
-	)
-	lic := &License{}
-	if err := row.Scan(&lic.Key, &lic.FingerprintHash, &lic.CustomerID, &lic.CreatedAt); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrLicenseNotFound
-		}
-		return nil, err
-	}
-	return lic, nil
+	return &License{Key: key, CustomerEmail: email, TransactionRef: reference, ExpiresAt: expiresAt, CreatedAt: now}, true, nil
 }
 
 func (s *LicenseStore) FindByKey(ctx context.Context, key string) (*License, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT key, fingerprint_hash, customer_id, created_at FROM licenses WHERE key = ?`, key,
+		`SELECT key, customer_email, transaction_ref, expires_at, created_at FROM licenses WHERE key = ?`, key,
 	)
 	lic := &License{}
-	if err := row.Scan(&lic.Key, &lic.FingerprintHash, &lic.CustomerID, &lic.CreatedAt); err != nil {
+	if err := row.Scan(&lic.Key, &lic.CustomerEmail, &lic.TransactionRef, &lic.ExpiresAt, &lic.CreatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrLicenseNotFound
 		}
@@ -140,23 +111,31 @@ func (s *LicenseStore) FindByKey(ctx context.Context, key string) (*License, err
 	return lic, nil
 }
 
-func (s *LicenseStore) ValidateLicense(ctx context.Context, key, fingerprintHash string) (*License, error) {
+func (s *LicenseStore) ValidateLicense(ctx context.Context, key, email string) (*License, error) {
 	lic, err := s.FindByKey(ctx, key)
 	if err != nil {
 		return nil, err
 	}
-	if lic.FingerprintHash != fingerprintHash {
-		return nil, ErrFingerprintMismatch
+	if strings.TrimSpace(strings.ToLower(email)) == "" {
+		return nil, fmt.Errorf("email is required")
 	}
-	if time.Now().UTC().Sub(lic.CreatedAt) >= licenseValidity {
+	if !emailsEqual(lic.CustomerEmail, email) {
+		return nil, ErrEmailMismatch
+	}
+	if time.Now().UTC().After(lic.ExpiresAt) {
 		return nil, ErrLicenseExpired
 	}
 	return lic, nil
 }
 
-func sqliteIsConstraint(err error) bool {
+func emailsEqual(stored, provided string) bool {
+	return strings.EqualFold(strings.TrimSpace(stored), strings.TrimSpace(provided))
+}
+
+func isUniqueConstraint(err error) bool {
 	if err == nil {
 		return false
 	}
-	return strings.Contains(strings.ToLower(err.Error()), "constraint")
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "unique constraint failed") || strings.Contains(msg, "constraint failed")
 }
