@@ -3,6 +3,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha512"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -11,7 +14,7 @@ import (
 	"time"
 )
 
-func TestCreateAndValidateLicense(t *testing.T) {
+func TestHandlePaystackWebhookCreatesLicense(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "licenses.db")
 	store, err := NewLicenseStore(dbPath)
@@ -20,84 +23,74 @@ func TestCreateAndValidateLicense(t *testing.T) {
 	}
 	defer store.Close()
 
-	handler := NewLicenseHandler(store, "secret")
+	secret := "paystack-secret"
+	handler := NewLicenseHandler(store, "", secret)
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/api/v1/licenses":
-			handler.CreateLicense(w, r)
-		case "/api/v1/licenses/validate":
-			handler.ValidateLicense(w, r)
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer server.Close()
+	payload := map[string]any{
+		"event": "charge.success",
+		"data": map[string]any{
+			"reference": "PSK_ref_123",
+			"paid_at":   time.Now().UTC().Format(time.RFC3339),
+			"customer": map[string]any{
+				"email": "user@example.com",
+			},
+		},
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
 
-	client := server.Client()
-
-	body, _ := json.Marshal(map[string]string{
-		"customerId":  "Acme",
-		"fingerprint": "machine",
-	})
-	req, _ := http.NewRequest(http.MethodPost, server.URL+"/api/v1/licenses", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/paystack/webhook", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Installer-Token", "secret")
-	resp, err := client.Do(req)
-	if err != nil {
-		t.Fatalf("create license request error: %v", err)
-	}
-	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("expected status 201, got %d", resp.StatusCode)
-	}
-	var createResp map[string]string
-	if err := json.NewDecoder(resp.Body).Decode(&createResp); err != nil {
-		t.Fatalf("decode create response: %v", err)
-	}
-	resp.Body.Close()
-	key := createResp["licenseKey"]
-	if key == "" {
-		t.Fatal("expected license key in response")
-	}
-
-	valBody, _ := json.Marshal(map[string]string{
-		"licenseKey":  key,
-		"fingerprint": "machine",
-	})
-	req, _ = http.NewRequest(http.MethodPost, server.URL+"/api/v1/licenses/validate", bytes.NewReader(valBody))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Installer-Token", "secret")
-	resp, err = client.Do(req)
-	if err != nil {
-		t.Fatalf("validate request error: %v", err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("expected 200, got %d", resp.StatusCode)
-	}
-	resp.Body.Close()
-}
-
-func TestUnauthorizedToken(t *testing.T) {
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "licenses.db")
-	store, err := NewLicenseStore(dbPath)
-	if err != nil {
-		t.Fatalf("NewLicenseStore: %v", err)
-	}
-	defer store.Close()
-
-	handler := NewLicenseHandler(store, "secret")
-
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/licenses", bytes.NewReader([]byte("{}")))
+	req.Header.Set("x-paystack-signature", signPayload(secret, body))
 	rr := httptest.NewRecorder()
 
-	handler.CreateLicense(rr, req)
+	handler.HandlePaystackWebhook(rr, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", rr.Code)
+	}
+
+	var resp struct {
+		LicenseKey string `json:"licenseKey"`
+		ExpiresAt  string `json:"expiresAt"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.LicenseKey == "" {
+		t.Fatal("expected license key in response")
+	}
+	if resp.ExpiresAt == "" {
+		t.Fatal("expected expiry timestamp in response")
+	}
+
+	if _, err := store.ValidateLicense(context.Background(), resp.LicenseKey, "user@example.com"); err != nil {
+		t.Fatalf("ValidateLicense: %v", err)
+	}
+}
+
+func TestValidateLicenseRequiresToken(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "licenses.db")
+	store, err := NewLicenseStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewLicenseStore: %v", err)
+	}
+	defer store.Close()
+
+	handler := NewLicenseHandler(store, "installer-secret", "")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/licenses/validate", bytes.NewReader([]byte(`{"licenseKey":"key","email":"user@example.com"}`)))
+	rr := httptest.NewRecorder()
+
+	handler.ValidateLicense(rr, req)
 	if rr.Code != http.StatusForbidden {
 		t.Fatalf("expected 403, got %d", rr.Code)
 	}
 }
 
-func TestValidateLicenseExpired(t *testing.T) {
+func TestValidateLicenseSuccess(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "licenses.db")
 	store, err := NewLicenseStore(dbPath)
@@ -106,68 +99,55 @@ func TestValidateLicenseExpired(t *testing.T) {
 	}
 	defer store.Close()
 
-	handler := NewLicenseHandler(store, "secret")
+	expiresAt := time.Now().Add(licenseValidity)
+	lic, err := store.CreateLicense(context.Background(), "user@example.com", "ref-123", expiresAt)
+	if err != nil {
+		t.Fatalf("CreateLicense: %v", err)
+	}
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/api/v1/licenses":
-			handler.CreateLicense(w, r)
-		case "/api/v1/licenses/validate":
-			handler.ValidateLicense(w, r)
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer server.Close()
-
-	client := server.Client()
+	handler := NewLicenseHandler(store, "installer-secret", "")
 
 	body, _ := json.Marshal(map[string]string{
-		"customerId":  "Acme",
-		"fingerprint": "machine",
+		"licenseKey": lic.Key,
+		"email":      "user@example.com",
 	})
-	req, _ := http.NewRequest(http.MethodPost, server.URL+"/api/v1/licenses", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/licenses/validate", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Installer-Token", "secret")
-	resp, err := client.Do(req)
-	if err != nil {
-		t.Fatalf("create license request error: %v", err)
-	}
-	var createResp map[string]string
-	if err := json.NewDecoder(resp.Body).Decode(&createResp); err != nil {
-		t.Fatalf("decode create response: %v", err)
-	}
-	resp.Body.Close()
-	key := createResp["licenseKey"]
-	if key == "" {
-		t.Fatal("expected license key in response")
-	}
+	req.Header.Set("X-Installer-Token", "installer-secret")
+	rr := httptest.NewRecorder()
 
-	if _, err := store.db.ExecContext(context.Background(),
-		`UPDATE licenses SET created_at = ? WHERE key = ?`,
-		time.Now().UTC().Add(-31*24*time.Hour), key,
-	); err != nil {
-		t.Fatalf("update license timestamp: %v", err)
+	handler.ValidateLicense(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
 	}
+}
 
-	valBody, _ := json.Marshal(map[string]string{
-		"licenseKey":  key,
-		"fingerprint": "machine",
-	})
-	req, _ = http.NewRequest(http.MethodPost, server.URL+"/api/v1/licenses/validate", bytes.NewReader(valBody))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Installer-Token", "secret")
-	resp, err = client.Do(req)
+func TestHandlePaystackWebhookInvalidSignature(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "licenses.db")
+	store, err := NewLicenseStore(dbPath)
 	if err != nil {
-		t.Fatalf("validate request error: %v", err)
+		t.Fatalf("NewLicenseStore: %v", err)
 	}
-	if resp.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("expected 401, got %d", resp.StatusCode)
+	defer store.Close()
+
+	handler := NewLicenseHandler(store, "", "paystack-secret")
+
+	payload := map[string]any{"event": "charge.success", "data": map[string]any{"reference": "ref", "customer": map[string]any{"email": "user@example.com"}}}
+	body, _ := json.Marshal(payload)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/paystack/webhook", bytes.NewReader(body))
+	req.Header.Set("x-paystack-signature", "invalid")
+	rr := httptest.NewRecorder()
+
+	handler.HandlePaystackWebhook(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d", rr.Code)
 	}
-	buf := new(bytes.Buffer)
-	buf.ReadFrom(resp.Body)
-	resp.Body.Close()
-	if !bytes.Contains(buf.Bytes(), []byte("license expired")) {
-		t.Fatalf("expected error message about expiration, got %q", buf.String())
-	}
+}
+
+func signPayload(secret string, body []byte) string {
+	mac := hmac.New(sha512.New, []byte(secret))
+	mac.Write(body)
+	return hex.EncodeToString(mac.Sum(nil))
 }

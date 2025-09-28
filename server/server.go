@@ -17,10 +17,12 @@ func main() {
 	defaultAddr := envOrDefault("LICENSE_BIND_ADDR", ":8080")
 	defaultDB := envOrDefault("LICENSE_DB_PATH", "data/licenses.db")
 	defaultToken := os.Getenv("LICENSE_API_TOKEN")
+	webhookSecret := os.Getenv("PAYSTACK_WEBHOOK_SECRET")
 
 	addr := flag.String("addr", defaultAddr, "HTTP bind address")
 	dbPath := flag.String("db", defaultDB, "path to the SQLite database file")
 	token := flag.String("token", defaultToken, "shared installer token")
+	paystackSecret := flag.String("paystack-webhook-secret", webhookSecret, "Paystack webhook signing secret")
 	flag.Parse()
 
 	store, err := NewLicenseStore(*dbPath)
@@ -29,10 +31,10 @@ func main() {
 	}
 	defer store.Close()
 
-	handler := NewLicenseHandler(store, *token)
+	handler := NewLicenseHandler(store, *token, *paystackSecret)
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/api/v1/licenses", handler.CreateLicense)
+	mux.HandleFunc("/api/v1/paystack/webhook", handler.HandlePaystackWebhook)
 	mux.HandleFunc("/api/v1/licenses/validate", handler.ValidateLicense)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

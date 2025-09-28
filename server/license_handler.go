@@ -1,62 +1,87 @@
 package main
 
 import (
+	"crypto/hmac"
+	"crypto/sha512"
 	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
+	"time"
 )
 
 type LicenseHandler struct {
-	store *LicenseStore
-	token string
+	store         *LicenseStore
+	token         string
+	webhookSecret string
 }
 
-func NewLicenseHandler(store *LicenseStore, token string) *LicenseHandler {
-	return &LicenseHandler{store: store, token: strings.TrimSpace(token)}
+func NewLicenseHandler(store *LicenseStore, token, webhookSecret string) *LicenseHandler {
+	return &LicenseHandler{
+		store:         store,
+		token:         strings.TrimSpace(token),
+		webhookSecret: strings.TrimSpace(webhookSecret),
+	}
 }
 
-func (h *LicenseHandler) CreateLicense(w http.ResponseWriter, r *http.Request) {
+func (h *LicenseHandler) HandlePaystackWebhook(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if !h.authorize(w, r) {
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "unable to read request body", http.StatusBadRequest)
 		return
 	}
 
-	var payload struct {
-		CustomerID  string `json:"customerId"`
-		Fingerprint string `json:"fingerprint"`
+	if !h.verifySignature(r.Header.Get("x-paystack-signature"), body) {
+		http.Error(w, "invalid signature", http.StatusForbidden)
+		return
 	}
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+
+	var payload paystackEvent
+	if err := json.Unmarshal(body, &payload); err != nil {
 		http.Error(w, "invalid JSON payload", http.StatusBadRequest)
 		return
 	}
-	payload.CustomerID = strings.TrimSpace(payload.CustomerID)
-	payload.Fingerprint = strings.TrimSpace(payload.Fingerprint)
-	if payload.CustomerID == "" || payload.Fingerprint == "" {
-		http.Error(w, "customerId and fingerprint are required", http.StatusBadRequest)
+
+	if !payload.IsSuccessfulEvent() {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("ignored"))
 		return
 	}
 
-	hash := HashFingerprint(payload.Fingerprint)
-	sanitized := sanitizeCustomerID(payload.CustomerID)
-	license, created, err := h.store.CreateLicense(r.Context(), sanitized, hash)
+	email := strings.TrimSpace(payload.Data.Customer.Email)
+	reference := strings.TrimSpace(payload.Data.Reference)
+	if email == "" || reference == "" {
+		http.Error(w, "missing customer email or transaction reference", http.StatusBadRequest)
+		return
+	}
+
+	paidAt := payload.Data.PaidAt.Time
+	if payload.Data.PaidAt.IsZero() {
+		paidAt = time.Now().UTC()
+	}
+	expiresAt := paidAt.Add(licenseValidity)
+
+	license, err := h.store.CreateLicense(r.Context(), email, reference, expiresAt)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	status := http.StatusOK
-	if created {
-		status = http.StatusCreated
-	}
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(map[string]string{"licenseKey": license.Key})
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]any{
+		"licenseKey": license.Key,
+		"expiresAt":  license.ExpiresAt.Format(time.RFC3339),
+	})
 }
 
 func (h *LicenseHandler) ValidateLicense(w http.ResponseWriter, r *http.Request) {
@@ -70,27 +95,26 @@ func (h *LicenseHandler) ValidateLicense(w http.ResponseWriter, r *http.Request)
 	}
 
 	var payload struct {
-		LicenseKey  string `json:"licenseKey"`
-		Fingerprint string `json:"fingerprint"`
+		LicenseKey string `json:"licenseKey"`
+		Email      string `json:"email"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 		http.Error(w, "invalid JSON payload", http.StatusBadRequest)
 		return
 	}
 	payload.LicenseKey = strings.TrimSpace(payload.LicenseKey)
-	payload.Fingerprint = strings.TrimSpace(payload.Fingerprint)
-	if payload.LicenseKey == "" || payload.Fingerprint == "" {
-		http.Error(w, "licenseKey and fingerprint are required", http.StatusBadRequest)
+	payload.Email = strings.TrimSpace(payload.Email)
+	if payload.LicenseKey == "" || payload.Email == "" {
+		http.Error(w, "licenseKey and email are required", http.StatusBadRequest)
 		return
 	}
 
-	hash := HashFingerprint(payload.Fingerprint)
-	if _, err := h.store.ValidateLicense(r.Context(), payload.LicenseKey, hash); err != nil {
+	if _, err := h.store.ValidateLicense(r.Context(), payload.LicenseKey, payload.Email); err != nil {
 		switch {
 		case errors.Is(err, ErrLicenseNotFound):
 			http.Error(w, "license not found", http.StatusUnauthorized)
-		case errors.Is(err, ErrFingerprintMismatch):
-			http.Error(w, "fingerprint mismatch", http.StatusUnauthorized)
+		case errors.Is(err, ErrEmailMismatch):
+			http.Error(w, "email mismatch", http.StatusUnauthorized)
 		case errors.Is(err, ErrLicenseExpired):
 			http.Error(w, "license expired", http.StatusUnauthorized)
 		default:
@@ -113,4 +137,66 @@ func (h *LicenseHandler) authorize(w http.ResponseWriter, r *http.Request) bool 
 	}
 	http.Error(w, "forbidden", http.StatusForbidden)
 	return false
+}
+
+func (h *LicenseHandler) verifySignature(signature string, body []byte) bool {
+	if h.webhookSecret == "" {
+		return true
+	}
+	mac := hmac.New(sha512.New, []byte(h.webhookSecret))
+	mac.Write(body)
+	expected := hex.EncodeToString(mac.Sum(nil))
+	return subtle.ConstantTimeCompare([]byte(strings.TrimSpace(signature)), []byte(expected)) == 1
+}
+
+type paystackEvent struct {
+	Event string          `json:"event"`
+	Data  paystackPayload `json:"data"`
+}
+
+func (e paystackEvent) IsSuccessfulEvent() bool {
+	if strings.EqualFold(e.Event, "charge.success") || strings.EqualFold(e.Event, "invoice.create") || strings.EqualFold(e.Event, "subscription.create") || strings.EqualFold(e.Event, "subscription.renewed") {
+		return true
+	}
+	return false
+}
+
+type paystackPayload struct {
+	Reference string           `json:"reference"`
+	PaidAt    paystackTime     `json:"paid_at"`
+	Customer  paystackCustomer `json:"customer"`
+}
+
+type paystackCustomer struct {
+	Email string `json:"email"`
+}
+
+type paystackTime struct {
+	time.Time
+}
+
+func (pt *paystackTime) UnmarshalJSON(data []byte) error {
+	if string(data) == "null" {
+		pt.Time = time.Time{}
+		return nil
+	}
+	var raw string
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		pt.Time = time.Time{}
+		return nil
+	}
+	parsed, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return err
+	}
+	pt.Time = parsed
+	return nil
+}
+
+func (pt paystackTime) IsZero() bool {
+	return pt.Time.IsZero()
 }
