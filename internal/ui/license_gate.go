@@ -21,34 +21,36 @@ import (
 	"github.com/umarmf343/Umar-kdp-product-api/internal/license"
 )
 
-func enforceLicense() (*license.Client, string, string) {
+func enforceLicense() (*license.Client, *license.LicenseData, string) {
 	client, err := license.NewClientFromEnv()
 	if err != nil {
 		if errors.Is(err, license.ErrMissingBaseURL) {
-			return nil, "", "Set LICENSE_API_URL to your license server endpoint before launching the app."
+			return nil, nil, "Set LICENSE_API_URL to your license server endpoint before launching the app."
 		}
-		return nil, "", fmt.Sprintf("Unable to create license client: %v", err)
+		return nil, nil, fmt.Sprintf("Unable to create license client: %v", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	key, err := license.ValidateLocalLicense(ctx, client)
+	data, err := license.ValidateLocalLicense(ctx, client)
 	if err != nil {
-		return client, "", licenseErrorMessage(err)
+		return client, nil, licenseErrorMessage(err)
 	}
 
-	return client, key, ""
+	return client, &data, ""
 }
 
 func licenseErrorMessage(err error) string {
 	switch {
 	case errors.Is(err, os.ErrNotExist):
-		return "License key not found. Please run the installer to activate this machine."
-	case errors.Is(err, license.ErrEmptyLicenseKey):
-		return "The stored license key is empty. Re-run the installer or paste a valid key."
+		return "License details not found. Please complete activation to unlock the app."
+	case errors.Is(err, license.ErrEmptyLicenseFile),
+		errors.Is(err, license.ErrEmptyLicenseKey),
+		errors.Is(err, license.ErrMissingEmail):
+		return "The stored license details are incomplete. Re-run activation with a valid email and key."
 	case errors.Is(err, license.ErrInvalidLicense):
-		return "The license key on this machine is invalid or expired. Contact support to refresh it."
+		return "The license key on this machine is invalid or expired. Renew your subscription to continue."
 	case errors.Is(err, license.ErrUnauthorizedToken):
 		return "The installer token configured for this app is not authorized. Check LICENSE_API_TOKEN."
 	default:
@@ -56,7 +58,7 @@ func licenseErrorMessage(err error) string {
 	}
 }
 
-func renderLicenseFailure(window fyne.Window, client *license.Client, message string) {
+func renderLicenseFailure(window fyne.Window, client *license.Client, message string, existing *license.LicenseData) {
 	window.SetTitle("RankBeam — Activate License")
 
 	heroTitle := canvas.NewText("Activate Your Competitive Edge", theme.PrimaryColor())
@@ -88,10 +90,19 @@ func renderLicenseFailure(window fyne.Window, client *license.Client, message st
 	})
 	ctaButton.Importance = widget.HighImportance
 
+	emailEntry := widget.NewEntry()
+	emailEntry.SetPlaceHolder("you@example.com")
+	if existing != nil {
+		emailEntry.SetText(existing.Email)
+	}
+
 	licenseEntry := widget.NewMultiLineEntry()
 	licenseEntry.SetPlaceHolder("Paste your license key here…")
 	licenseEntry.Wrapping = fyne.TextWrapWord
 	licenseEntry.SetMinRowsVisible(6)
+	if existing != nil {
+		licenseEntry.SetText(existing.Key)
+	}
 
 	statusLabel := widget.NewLabel("")
 	statusLabel.Wrapping = fyne.TextWrapWord
@@ -102,7 +113,7 @@ func renderLicenseFailure(window fyne.Window, client *license.Client, message st
 	var activationInProgress bool
 
 	updateSubmitButtonState := func() {
-		if activationInProgress || strings.TrimSpace(licenseEntry.Text) == "" {
+		if activationInProgress || strings.TrimSpace(licenseEntry.Text) == "" || strings.TrimSpace(emailEntry.Text) == "" {
 			submitButton.Disable()
 			return
 		}
@@ -110,6 +121,9 @@ func renderLicenseFailure(window fyne.Window, client *license.Client, message st
 	}
 
 	licenseEntry.OnChanged = func(string) {
+		updateSubmitButtonState()
+	}
+	emailEntry.OnChanged = func(string) {
 		updateSubmitButtonState()
 	}
 
@@ -122,25 +136,27 @@ func renderLicenseFailure(window fyne.Window, client *license.Client, message st
 		}
 
 		key := strings.TrimSpace(licenseEntry.Text)
+		email := strings.TrimSpace(emailEntry.Text)
 		if key == "" {
 			dialog.ShowInformation("License Activation", "Paste a valid license key before continuing.", window)
+			return
+		}
+		if email == "" {
+			dialog.ShowInformation("License Activation", "Enter the email address tied to your subscription.", window)
 			return
 		}
 
 		activationInProgress = true
 		updateSubmitButtonState()
-		statusLabel.SetText("Validating your license with the command server…")
+		statusLabel.SetText("Validating your subscription…")
 
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 			defer cancel()
 
-			fingerprint, err := license.Fingerprint()
+			err := client.ValidateLicense(ctx, key, email)
 			if err == nil {
-				err = client.ValidateLicense(ctx, key, fingerprint)
-			}
-			if err == nil {
-				_, err = license.SaveLicenseKey(key)
+				_, err = license.SaveLicense(license.LicenseData{Key: key, Email: email})
 			}
 
 			queueOnMain(window, func() {
@@ -169,6 +185,10 @@ func renderLicenseFailure(window fyne.Window, client *license.Client, message st
 	form := container.NewVBox(
 		formHeader,
 		widget.NewSeparator(),
+		widget.NewLabel("Subscription Email"),
+		emailEntry,
+		widget.NewSeparator(),
+		widget.NewLabel("License Key"),
 		licenseEntry,
 		container.NewHBox(layout.NewSpacer(), submitButton),
 		statusLabel,
@@ -206,7 +226,9 @@ func activationErrorMessage(err error) string {
 	case errors.Is(err, context.DeadlineExceeded):
 		return "Activation timed out. Check your connection and try again."
 	case errors.Is(err, license.ErrInvalidLicense),
+		errors.Is(err, license.ErrEmptyLicenseFile),
 		errors.Is(err, license.ErrEmptyLicenseKey),
+		errors.Is(err, license.ErrMissingEmail),
 		errors.Is(err, license.ErrUnauthorizedToken):
 		return licenseErrorMessage(err)
 	case errors.Is(err, os.ErrPermission):

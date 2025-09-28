@@ -1,231 +1,100 @@
-Serve Guide for RankBeam License Server
-======================================
+RankBeam License Server Quickstart (Paystack Edition)
+====================================================
 
-This note explains, in friendly beginner language, how to run the RankBeam license generator on a server, connect it to your live web address, and issue license keys after Paystack confirms a payment. Follow each section in order and you will have an end-to-end flow that hands a valid key to your customer automatically.
+This beginner-friendly note explains how to run the updated RankBeam license
+server, connect it to Paystack subscriptions, and test license validation end to
+end. Read `Paystack licence Guide.txt` for full operational checklists; use this
+file when you just need a high-level walkthrough.
 
 1. What the license server does
 -------------------------------
-* The Go program inside the `server/` folder stores one license record per machine fingerprint in a small SQLite database (`data/licenses.db`).
-* It exposes two HTTPS endpoints:
-  * `POST /api/v1/licenses` – creates or reuses a license key when you pass a `customerId` (usually an email) and a device `fingerprint`.
-  * `POST /api/v1/licenses/validate` – checks if a key still matches the fingerprint stored in the database.
-* Both endpoints expect an installer token in the header `X-Installer-Token`. This protects you so random people cannot mint free keys.
+* Listens for Paystack webhooks at `POST /api/v1/paystack/webhook`.
+* Stores license rows in `data/licenses.db` with fields: license key, customer
+  email, Paystack transaction reference, expiry timestamp (30 days from the
+  payment date), and audit timestamps.
+* Validates licenses via `POST /api/v1/licenses/validate` using the key + email
+  combination. Hardware fingerprints are no longer required.
 
-2. Tools you need
------------------
-* Go 1.21 or newer (matching the version used by the project).
-* Git (optional but handy for pulling updates).
-* A domain name and basic DNS access.
-* A Paystack business account (so you can create plans, set the price, and receive payments).
-* On Linux servers you will also want:
-  * `systemd` (ships with Ubuntu, Debian, CentOS, etc.).
-  * A reverse proxy such as Nginx or Caddy to serve HTTPS.
+2. Configure the server locally
+-------------------------------
+Create a `.env` file inside the `server/` directory with your development values:
 
-3. Decide the selling price in Paystack
----------------------------------------
-1. Sign in to the Paystack dashboard as an admin.
-2. Create a **Product** or **Plan** for RankBeam. Set the price, currency, and frequency (one-time or subscription) exactly how you want to charge customers. You can change this any time without touching the Go code.
-3. Copy the Product/Plan code – you will use it when creating payment links or inline checkout forms.
-
-4. Run the license server on your laptop first
----------------------------------------------
-1. Open a terminal in the project root.
-2. Create a `.env` file or export variables in your shell:
-   ```bash
-   export LICENSE_BIND_ADDR=":8080"               # listen locally
-   export LICENSE_DB_PATH="data/licenses.db"      # SQLite file
-   export LICENSE_API_TOKEN="super-secret-token"  # match the desktop installer
-   ```
-3. Make sure the `data/` folder exists: `mkdir -p data`.
-4. Launch the server:
-   ```bash
-   go run ./server
-   ```
-5. In another terminal, test the API with curl (replace the sample values with real ones):
-   ```bash
-   curl -X POST http://localhost:8080/api/v1/licenses \
-     -H "Content-Type: application/json" \
-     -H "X-Installer-Token: super-secret-token" \
-     -d '{"customerId":"jane@example.com","fingerprint":"ABC123DEVICEHASH"}'
-   ```
-   The response JSON includes `"licenseKey"`. Save it – the same key will be returned every time that fingerprint calls the API.
-6. To validate a key:
-   ```bash
-   curl -X POST http://localhost:8080/api/v1/licenses/validate \
-     -H "Content-Type: application/json" \
-     -H "X-Installer-Token: super-secret-token" \
-     -d '{"licenseKey":"THE-LICENSE-YOU-GOT","fingerprint":"ABC123DEVICEHASH"}'
-   ```
-   A `{"status":"valid"}` reply means the key and fingerprint match.
-
-5. Deploying to a web address (example: Ubuntu + Nginx)
-------------------------------------------------------
-1. Copy the project to the server (`scp -r Umar-kdp-product-api user@your-server:`) and log in via SSH.
-2. Install Go (if not already installed) and create a dedicated system user, e.g. `sudo useradd -r -s /bin/false rankbeam`.
-3. Build a single binary:
-   ```bash
-   cd ~/Umar-kdp-product-api
-   go build -o /opt/rankbeam/license-server ./server
-   sudo chown rankbeam:rankbeam /opt/rankbeam/license-server
-   sudo mkdir -p /opt/rankbeam/data
-   sudo chown rankbeam:rankbeam /opt/rankbeam/data
-   ```
-4. Create a `systemd` unit at `/etc/systemd/system/rankbeam.service`:
-   ```ini
-   [Unit]
-   Description=RankBeam License Server
-   After=network.target
-
-   [Service]
-   Type=simple
-   User=rankbeam
-   WorkingDirectory=/opt/rankbeam
-   Environment=LICENSE_BIND_ADDR=:8080
-   Environment=LICENSE_DB_PATH=/opt/rankbeam/data/licenses.db
-   Environment=LICENSE_API_TOKEN=super-secret-token
-   ExecStart=/opt/rankbeam/license-server
-   Restart=on-failure
-
-   [Install]
-   WantedBy=multi-user.target
-   ```
-   Reload and start it:
-   ```bash
-   sudo systemctl daemon-reload
-   sudo systemctl enable --now rankbeam.service
-   sudo systemctl status rankbeam.service
-   ```
-5. Point your domain (e.g. `licensing.yourdomain.com`) to the server IP with an A record.
-6. Install Nginx (or Caddy) and create a reverse-proxy that forwards HTTPS traffic to `http://127.0.0.1:8080`. Example Nginx snippet:
-   ```nginx
-   server {
-       listen 80;
-       server_name licensing.yourdomain.com;
-       location / {
-           proxy_pass http://127.0.0.1:8080;
-           proxy_set_header Host $host;
-           proxy_set_header X-Forwarded-Proto $scheme;
-       }
-   }
-   ```
-7. Use Certbot (`sudo certbot --nginx`) to request a free Let’s Encrypt TLS certificate. After that your API lives at `https://licensing.yourdomain.com`.
-
-6. Connect Paystack to the license server
-----------------------------------------
-### 6.1 Collect the fingerprint during checkout
-* The RankBeam installer can gather the fingerprint automatically when the desktop app runs.
-* If you sell licenses *before* users download the installer, ask buyers for their machine fingerprint on a web form. You can let the desktop app display the fingerprint to copy/paste or allow customers to paste it later inside the app – the API always returns the same key for the same fingerprint.
-
-### 6.2 Use Paystack’s inline or standard checkout
-1. Embed the Paystack **Inline** script on your website or create a **Payment Page** linked to your Product/Plan.
-2. Pass the customer email and any metadata you need (for example, the fingerprint) to the transaction. Example inline setup:
-   ```html
-   <script src="https://js.paystack.co/v1/inline.js"></script>
-   <button onclick="payWithPaystack()">Buy RankBeam License</button>
-   <script>
-   function payWithPaystack() {
-     const handler = PaystackPop.setup({
-       key: 'pk_live_your_public_key',
-       email: document.querySelector('#email').value,
-       amount: 750000, // amount in kobo (₦7,500.00)
-       metadata: {
-         custom_fields: [
-           {
-             display_name: 'Fingerprint',
-             variable_name: 'fingerprint',
-             value: document.querySelector('#fingerprint').value
-           }
-         ]
-       },
-       callback: function(response) {
-         // optional: display a success message before redirecting
-       },
-       onClose: function() {
-         alert('Payment window closed');
-       }
-     });
-     handler.openIframe();
-   }
-   </script>
-   ```
-   Adjust the `amount` to match the price set in the Paystack dashboard.
-
-### 6.3 Verify the payment and create the license
-* Always confirm the transaction server-side using Paystack’s REST API or webhook. Only issue a license after Paystack says the payment is successful.
-* The snippet below shows a simple Node.js/Express webhook that verifies the event and then calls the RankBeam license API. Use the language you are comfortable with—the idea is the same everywhere.
-
-```javascript
-// server/paystack-webhook.js
-import express from 'express';
-import crypto from 'crypto';
-import axios from 'axios';
-
-const app = express();
-app.use(express.json({ verify: (req, res, buf) => { req.rawBody = buf; } }));
-
-const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET;
-const LICENSE_API = process.env.LICENSE_API_URL;          // e.g. https://licensing.yourdomain.com
-const LICENSE_TOKEN = process.env.LICENSE_API_TOKEN;      // same value used by the installer
-
-function isValidSignature(req) {
-  const signature = req.headers['x-paystack-signature'];
-  const hash = crypto.createHmac('sha512', PAYSTACK_SECRET)
-    .update(req.rawBody)
-    .digest('hex');
-  return signature && signature === hash;
-}
-
-app.post('/webhooks/paystack', async (req, res) => {
-  if (!isValidSignature(req)) return res.status(401).send('invalid signature');
-
-  const event = req.body;
-  if (event.event !== 'charge.success') return res.sendStatus(200);
-
-  const email = event.data.customer.email;
-  const fingerprint = event.data.metadata?.custom_fields?.find(f => f.variable_name === 'fingerprint')?.value;
-  if (!fingerprint) {
-    console.error('Missing fingerprint, manual follow-up needed');
-    return res.sendStatus(200);
-  }
-
-  try {
-    const { data } = await axios.post(
-      `${LICENSE_API}/api/v1/licenses`,
-      { customerId: email, fingerprint },
-      { headers: { 'X-Installer-Token': LICENSE_TOKEN } }
-    );
-    // TODO: email the license key to the buyer or store it in your CRM
-    console.log('Issued license', data.licenseKey, 'for', email);
-  } catch (err) {
-    console.error('License issuance failed', err.response?.data || err.message);
-  }
-
-  res.sendStatus(200);
-});
-
-app.listen(4000, () => console.log('Paystack webhook listening on port 4000'));
+```dotenv
+LICENSE_BIND_ADDR=:8080
+LICENSE_DB_PATH=data/licenses.db
+LICENSE_API_TOKEN=dev-installer-token
+PAYSTACK_WEBHOOK_SECRET=whsec_test_secret
 ```
 
-*Tip:* If you prefer using Paystack’s transaction verification endpoint, call `https://api.paystack.co/transaction/verify/:reference` from your backend right after the customer completes checkout. Once the verification returns `status: success`, trigger the same `axios.post` shown above to mint the license.
+Run the API:
 
-### 6.4 Deliver the key to the customer
-* Send an email that contains the license key and a link to download the RankBeam installer.
-* Inside the installer, the user can paste the key manually if the automatic activation ever fails.
-
-7. Point RankBeam to the live server
------------------------------------
-Inside the desktop build environment (or in the CI pipeline) set the following environment variables before launching the app or building the installer:
 ```bash
-export LICENSE_API_URL="https://licensing.yourdomain.com"
-export LICENSE_API_TOKEN="super-secret-token"
+cd server
+go run .
 ```
-These values must match the token and URL you configured on the server so that RankBeam can activate successfully at launch.
 
-8. Daily maintenance tips
--------------------------
-* Back up the SQLite database (`data/licenses.db`) regularly. Copying the file once the service is stopped is enough.
-* Rotate the installer token if you suspect it leaked. Update the server environment variable, rebuild the installer, and publish the new package.
-* Monitor logs with `journalctl -u rankbeam.service -f`. Look out for `403` responses (bad token) or database errors.
-* Use Paystack’s dashboard reports to confirm revenue matches the number of licenses issued.
+You should see `license server listening on :8080`.
 
-With these steps your RankBeam customers pay through Paystack, your server generates a license key automatically, and the desktop app validates it every time it starts.
+3. Simulate a Paystack webhook
+------------------------------
+With the server running, post a fake successful payment event. The body must
+match Paystack’s JSON structure and include `customer.email`, `reference`, and
+`data.paid_at`.
+
+```bash
+curl -X POST http://localhost:8080/api/v1/paystack/webhook \
+  -H "Content-Type: application/json" \
+  -H "x-paystack-signature: $(printf 'test' | openssl dgst -sha512 -hmac whsec_test_secret | cut -d' ' -f2)" \
+  -d '{
+        "event": "charge.success",
+        "data": {
+          "reference": "PSK_demo_001",
+          "paid_at": "2024-11-01T12:00:00Z",
+          "customer": {"email": "buyer@example.com"}
+        }
+      }'
+```
+
+The response includes a freshly minted license key and its expiry date.
+
+4. Validate the stored license
+------------------------------
+Call the validation endpoint with the license key from the previous step:
+
+```bash
+curl -X POST http://localhost:8080/api/v1/licenses/validate \
+  -H "Content-Type: application/json" \
+  -H "X-Installer-Token: dev-installer-token" \
+  -d '{"licenseKey":"<KEY_FROM_WEBHOOK>","email":"buyer@example.com"}'
+```
+
+Expected response:
+
+```json
+{"status":"valid"}
+```
+
+If you supply an expired or mismatched key/email, the API returns `401`.
+
+5. Deploying to production
+--------------------------
+* Cross-compile the binary for Linux: `GOOS=linux GOARCH=amd64 go build -o build/license-server ./server`.
+* Upload the binary plus `.env` file to your server or hosting account.
+* Ensure the process runs with write access to the directory that holds
+  `data/licenses.db`.
+* Expose the binary behind HTTPS (NGINX, cPanel Application Manager, or any
+  reverse proxy works).
+* Configure Paystack Dashboard → **Settings → API Keys & Webhooks** to send
+  successful subscription events to your public webhook URL.
+
+6. Ongoing maintenance tips
+---------------------------
+* Back up `data/licenses.db` weekly. A simple tarball copied off the server is
+  enough because SQLite is self-contained.
+* Rotate `PAYSTACK_WEBHOOK_SECRET` and `LICENSE_API_TOKEN` periodically; update
+  the environment and restart the service.
+* Monitor logs for `invalid signature` or `license expired` messages—they often
+  point to billing issues that need follow-up with the subscriber.
+
+With these steps you have a working Paystack-integrated licensing backend that
+the desktop app and installer can trust.

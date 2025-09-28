@@ -1,47 +1,61 @@
 package license
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
-const productConfigDir = "RankBeam"
+const (
+	productConfigDir = "RankBeam"
+	licenseFileName  = "license.json"
+)
 
-var ErrEmptyLicenseKey = errors.New("license: empty key on disk")
+var ErrEmptyLicenseFile = errors.New("license: empty license file")
 
 // StoragePath returns the absolute path where the installer stores the
-// machine's license key.
+// machine's license data.
 func StoragePath() (string, error) {
 	configDir, err := os.UserConfigDir()
 	if err != nil {
 		return "", fmt.Errorf("license: resolve config dir: %w", err)
 	}
-	return filepath.Join(configDir, productConfigDir, "license.key"), nil
+	return filepath.Join(configDir, productConfigDir, licenseFileName), nil
 }
 
-// LoadLicenseKey reads and trims the persisted license key.
-func LoadLicenseKey() (string, error) {
+// LoadLicense reads and normalises the persisted license details.
+func LoadLicense() (LicenseData, error) {
 	path, err := StoragePath()
 	if err != nil {
-		return "", err
+		return LicenseData{}, err
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return "", err
+		return LicenseData{}, err
 	}
-	key := strings.TrimSpace(string(data))
-	if key == "" {
-		return "", ErrEmptyLicenseKey
+	if len(data) == 0 {
+		return LicenseData{}, ErrEmptyLicenseFile
 	}
-	return key, nil
+	var payload LicenseData
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return LicenseData{}, fmt.Errorf("license: parse stored license: %w", err)
+	}
+	payload = payload.Normalise()
+	if err := payload.Validate(); err != nil {
+		return LicenseData{}, err
+	}
+	return payload, nil
 }
 
-// SaveLicenseKey writes the license key to the storage path. It is primarily
-// used by tests and automation. The installer normally performs this step.
-func SaveLicenseKey(key string) (string, error) {
+// SaveLicense writes the license data to the storage path. The file is stored as JSON
+// to capture both the key and associated email address.
+func SaveLicense(data LicenseData) (string, error) {
+	normalised := data.Normalise()
+	if err := normalised.Validate(); err != nil {
+		return "", err
+	}
 	path, err := StoragePath()
 	if err != nil {
 		return "", err
@@ -49,8 +63,12 @@ func SaveLicenseKey(key string) (string, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return "", fmt.Errorf("license: create config dir: %w", err)
 	}
-	if err := os.WriteFile(path, []byte(strings.TrimSpace(key)+"\n"), 0o600); err != nil {
-		return "", fmt.Errorf("license: write key: %w", err)
+	encoded, err := json.MarshalIndent(normalised, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("license: encode license: %w", err)
+	}
+	if err := os.WriteFile(path, append(encoded, '\n'), 0o600); err != nil {
+		return "", fmt.Errorf("license: write license: %w", err)
 	}
 	return path, nil
 }

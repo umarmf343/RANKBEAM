@@ -18,6 +18,8 @@ var (
 	ErrMissingBaseURL    = errors.New("license: missing base URL")
 	ErrInvalidLicense    = errors.New("license: invalid or expired license")
 	ErrUnauthorizedToken = errors.New("license: unauthorized installer token")
+	ErrEmptyLicenseKey   = errors.New("license: empty key")
+	ErrMissingEmail      = errors.New("license: email address is required")
 )
 
 // Client wraps HTTP access to the license server.
@@ -25,6 +27,31 @@ type Client struct {
 	BaseURL    string
 	APIToken   string
 	HTTPClient *http.Client
+}
+
+// LicenseData represents the persisted license information for a device.
+type LicenseData struct {
+	Key   string `json:"licenseKey"`
+	Email string `json:"email"`
+}
+
+// Normalise trims whitespace and lowercases the email address.
+func (d LicenseData) Normalise() LicenseData {
+	return LicenseData{
+		Key:   strings.TrimSpace(d.Key),
+		Email: strings.ToLower(strings.TrimSpace(d.Email)),
+	}
+}
+
+// Validate ensures both the key and email are present.
+func (d LicenseData) Validate() error {
+	if strings.TrimSpace(d.Key) == "" {
+		return ErrEmptyLicenseKey
+	}
+	if strings.TrimSpace(d.Email) == "" {
+		return ErrMissingEmail
+	}
+	return nil
 }
 
 // NewClient constructs a Client and validates the provided base URL.
@@ -48,63 +75,21 @@ func NewClientFromEnv() (*Client, error) {
 	return NewClient(base, token, nil)
 }
 
-// RequestLicense asks the API to issue (or return an existing) license key for
-// the supplied fingerprint.
-func (c *Client) RequestLicense(ctx context.Context, customerID, fingerprint string) (string, error) {
-	payload := map[string]string{
-		"customerId":  strings.TrimSpace(customerID),
-		"fingerprint": strings.TrimSpace(fingerprint),
-	}
-	if payload["customerId"] == "" || payload["fingerprint"] == "" {
-		return "", fmt.Errorf("license: customer ID and fingerprint are required")
-	}
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return "", err
+// ValidateLicense ensures the provided license key belongs to the supplied email on the server.
+func (c *Client) ValidateLicense(ctx context.Context, licenseKey, email string) error {
+	if c == nil {
+		return errors.New("license: client is nil")
 	}
 
-	req, err := c.newRequest(ctx, http.MethodPost, "/api/v1/licenses", bytes.NewReader(body))
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.HTTPClient.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusForbidden {
-		return "", ErrUnauthorizedToken
-	}
-	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
-		return "", c.decodeHTTPError(resp)
+	payload := LicenseData{Key: licenseKey, Email: email}.Normalise()
+	if err := payload.Validate(); err != nil {
+		return err
 	}
 
-	var result struct {
-		LicenseKey string `json:"licenseKey"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", fmt.Errorf("license: parse response: %w", err)
-	}
-	if strings.TrimSpace(result.LicenseKey) == "" {
-		return "", fmt.Errorf("license: server returned empty license key")
-	}
-	return result.LicenseKey, nil
-}
-
-// ValidateLicense ensures the provided license key matches the supplied
-// fingerprint on the server.
-func (c *Client) ValidateLicense(ctx context.Context, licenseKey, fingerprint string) error {
-	payload := map[string]string{
-		"licenseKey":  strings.TrimSpace(licenseKey),
-		"fingerprint": strings.TrimSpace(fingerprint),
-	}
-	if payload["licenseKey"] == "" || payload["fingerprint"] == "" {
-		return fmt.Errorf("license: license key and fingerprint are required")
-	}
-	body, err := json.Marshal(payload)
+	body, err := json.Marshal(map[string]string{
+		"licenseKey": payload.Key,
+		"email":      payload.Email,
+	})
 	if err != nil {
 		return err
 	}
@@ -124,12 +109,13 @@ func (c *Client) ValidateLicense(ctx context.Context, licenseKey, fingerprint st
 	switch resp.StatusCode {
 	case http.StatusOK:
 		var result struct {
-			Status string `json:"status"`
+			Status    string `json:"status"`
+			ExpiresAt string `json:"expiresAt,omitempty"`
 		}
-		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil && !errors.Is(err, io.EOF) {
 			return fmt.Errorf("license: parse response: %w", err)
 		}
-		if strings.ToLower(result.Status) != "valid" {
+		if strings.ToLower(strings.TrimSpace(result.Status)) != "valid" {
 			return fmt.Errorf("license: unexpected validation status %q", result.Status)
 		}
 		return nil
@@ -143,6 +129,9 @@ func (c *Client) ValidateLicense(ctx context.Context, licenseKey, fingerprint st
 }
 
 func (c *Client) newRequest(ctx context.Context, method, path string, body io.Reader) (*http.Request, error) {
+	if c == nil {
+		return nil, errors.New("license: client is nil")
+	}
 	base, err := url.Parse(c.BaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("license: parse base URL: %w", err)
@@ -155,7 +144,7 @@ func (c *Client) newRequest(ctx context.Context, method, path string, body io.Re
 	if err != nil {
 		return nil, err
 	}
-	if c.APIToken != "" {
+	if strings.TrimSpace(c.APIToken) != "" {
 		req.Header.Set("X-Installer-Token", c.APIToken)
 	}
 	req.Header.Set("Accept", "application/json")
@@ -170,23 +159,19 @@ func (c *Client) decodeHTTPError(resp *http.Response) error {
 	return fmt.Errorf("license: server returned %s: %s", resp.Status, strings.TrimSpace(string(data)))
 }
 
-// ValidateLocalLicense loads the cached license key, computes the local
-// fingerprint, and confirms validity with the server. It returns the license key
-// on success to allow the caller to display or log it.
-func ValidateLocalLicense(ctx context.Context, client *Client) (string, error) {
+// ValidateLocalLicense loads the cached license data and confirms validity with the server.
+// It returns the normalised license data on success to allow callers to display or log it.
+func ValidateLocalLicense(ctx context.Context, client *Client) (LicenseData, error) {
 	if client == nil {
-		return "", errors.New("license: client is required")
+		return LicenseData{}, errors.New("license: client is required")
 	}
-	key, err := LoadLicenseKey()
+	data, err := LoadLicense()
 	if err != nil {
-		return "", err
+		return LicenseData{}, err
 	}
-	fingerprint, err := Fingerprint()
-	if err != nil {
-		return "", err
+	if err := client.ValidateLicense(ctx, data.Key, data.Email); err != nil {
+		return LicenseData{}, err
 	}
-	if err := client.ValidateLicense(ctx, key, fingerprint); err != nil {
-		return "", err
-	}
-	return key, nil
+	normalised := data.Normalise()
+	return normalised, nil
 }

@@ -56,14 +56,18 @@ func Run() {
 	window.Resize(fyne.NewSize(1024, 720))
 	window.SetMaster()
 
-	client, licenseKey, licenseError := enforceLicense()
+	client, licenseData, licenseError := enforceLicense()
 	if licenseError != "" {
-		renderLicenseFailure(window, client, licenseError)
+		renderLicenseFailure(window, client, licenseError, licenseData)
 		window.ShowAndRun()
 		return
 	}
 
-	loadMainApplication(window, licenseKey)
+	if licenseData != nil {
+		loadMainApplication(window, licenseData.Key)
+	} else {
+		loadMainApplication(window, "")
+	}
 	window.ShowAndRun()
 }
 

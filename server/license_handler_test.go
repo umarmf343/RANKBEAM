@@ -1,18 +1,33 @@
 package main
 
 import (
-	"bytes"
-	"context"
-	"crypto/hmac"
-	"crypto/sha512"
-	"encoding/hex"
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
-	"path/filepath"
-	"testing"
-	"time"
+        "bytes"
+        "context"
+        "crypto/hmac"
+        "crypto/sha512"
+        "encoding/hex"
+        "encoding/json"
+        "net/http"
+        "net/http/httptest"
+        "path/filepath"
+        "testing"
+        "time"
 )
+
+type fakeMailer struct {
+        calls   int
+        lastTo  string
+        lastKey string
+}
+
+func (f *fakeMailer) SendLicenseEmail(ctx context.Context, to string, license *License) error {
+        f.calls++
+        f.lastTo = to
+        if license != nil {
+                f.lastKey = license.Key
+        }
+        return nil
+}
 
 func TestHandlePaystackWebhookCreatesLicense(t *testing.T) {
 	dir := t.TempDir()
@@ -24,7 +39,8 @@ func TestHandlePaystackWebhookCreatesLicense(t *testing.T) {
 	defer store.Close()
 
 	secret := "paystack-secret"
-	handler := NewLicenseHandler(store, "", secret)
+        mailer := &fakeMailer{}
+        handler := NewLicenseHandler(store, "", secret, mailer)
 
 	payload := map[string]any{
 		"event": "charge.success",
@@ -65,9 +81,19 @@ func TestHandlePaystackWebhookCreatesLicense(t *testing.T) {
 		t.Fatal("expected expiry timestamp in response")
 	}
 
-	if _, err := store.ValidateLicense(context.Background(), resp.LicenseKey, "user@example.com"); err != nil {
-		t.Fatalf("ValidateLicense: %v", err)
-	}
+        if _, err := store.ValidateLicense(context.Background(), resp.LicenseKey, "user@example.com"); err != nil {
+                t.Fatalf("ValidateLicense: %v", err)
+        }
+
+        if mailer.calls != 1 {
+                t.Fatalf("expected mailer to be called once, got %d", mailer.calls)
+        }
+        if mailer.lastTo != "user@example.com" {
+                t.Fatalf("expected email to be sent to user@example.com, got %s", mailer.lastTo)
+        }
+        if mailer.lastKey != resp.LicenseKey {
+                t.Fatalf("expected email to include license key %s, got %s", resp.LicenseKey, mailer.lastKey)
+        }
 }
 
 func TestValidateLicenseRequiresToken(t *testing.T) {
@@ -79,7 +105,7 @@ func TestValidateLicenseRequiresToken(t *testing.T) {
 	}
 	defer store.Close()
 
-	handler := NewLicenseHandler(store, "installer-secret", "")
+        handler := NewLicenseHandler(store, "installer-secret", "", nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/licenses/validate", bytes.NewReader([]byte(`{"licenseKey":"key","email":"user@example.com"}`)))
 	rr := httptest.NewRecorder()
@@ -105,7 +131,7 @@ func TestValidateLicenseSuccess(t *testing.T) {
 		t.Fatalf("CreateLicense: %v", err)
 	}
 
-	handler := NewLicenseHandler(store, "installer-secret", "")
+        handler := NewLicenseHandler(store, "installer-secret", "", nil)
 
 	body, _ := json.Marshal(map[string]string{
 		"licenseKey": lic.Key,
@@ -131,7 +157,7 @@ func TestHandlePaystackWebhookInvalidSignature(t *testing.T) {
 	}
 	defer store.Close()
 
-	handler := NewLicenseHandler(store, "", "paystack-secret")
+        handler := NewLicenseHandler(store, "", "paystack-secret", nil)
 
 	payload := map[string]any{"event": "charge.success", "data": map[string]any{"reference": "ref", "customer": map[string]any{"email": "user@example.com"}}}
 	body, _ := json.Marshal(payload)

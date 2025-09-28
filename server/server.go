@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -31,7 +32,30 @@ func main() {
 	}
 	defer store.Close()
 
-	handler := NewLicenseHandler(store, *token, *paystackSecret)
+	smtpHost := strings.TrimSpace(os.Getenv("SMTP_HOST"))
+	smtpPortStr := strings.TrimSpace(os.Getenv("SMTP_PORT"))
+	smtpUser := strings.TrimSpace(os.Getenv("SMTP_USERNAME"))
+	smtpPass := strings.TrimSpace(os.Getenv("SMTP_PASSWORD"))
+	smtpFrom := strings.TrimSpace(os.Getenv("SMTP_FROM"))
+
+	var mailer Mailer
+	if smtpHost != "" && smtpFrom != "" {
+		port := 0
+		if smtpPortStr != "" {
+			if parsed, err := strconv.Atoi(smtpPortStr); err == nil {
+				port = parsed
+			} else {
+				log.Fatalf("invalid SMTP_PORT: %v", err)
+			}
+		}
+		m, err := NewSMTPMailer(smtpHost, port, smtpUser, smtpPass, smtpFrom)
+		if err != nil {
+			log.Fatalf("configure mailer: %v", err)
+		}
+		mailer = m
+	}
+
+	handler := NewLicenseHandler(store, *token, *paystackSecret, mailer)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v1/paystack/webhook", handler.HandlePaystackWebhook)

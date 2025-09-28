@@ -46,9 +46,9 @@ GOOS=windows GOARCH=amd64 go build -o rankbeam.exe ./cmd/app
 
 More detailed packaging instructions (including the Inno Setup installer) are available in [`docs/BUILD_WINDOWS.md`](docs/BUILD_WINDOWS.md).
 
-Looking to ship the desktop app with a per-machine license flow? Follow the step-by-step instructions in [`docs/license-system-guide.md`](docs/license-system-guide.md).
+Looking to ship the desktop app with the Paystack-backed subscription flow? Start with [`Paystack licence Guide.txt`](Paystack%20licence%20Guide.txt).
 
-Need a single checklist that covers building `fingerprint-helper.exe`, compiling the installer, and deploying the license server? Use [`docs/fingerprint-installer-license-guide.md`](docs/fingerprint-installer-license-guide.md).
+Need a concise packaging checklist? Follow [`inno setup.txt`](inno%20setup.txt).
 
 **Product List**
 ![alt text](https://i.imgur.com/ES5M4Rx.png)
