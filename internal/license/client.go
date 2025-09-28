@@ -15,11 +15,12 @@ import (
 )
 
 var (
-	ErrMissingBaseURL    = errors.New("license: missing base URL")
-	ErrInvalidLicense    = errors.New("license: invalid or expired license")
-	ErrUnauthorizedToken = errors.New("license: unauthorized installer token")
-	ErrEmptyLicenseKey   = errors.New("license: empty key")
-	ErrMissingEmail      = errors.New("license: email address is required")
+	ErrMissingBaseURL     = errors.New("license: missing base URL")
+	ErrInvalidLicense     = errors.New("license: invalid or expired license")
+	ErrUnauthorizedToken  = errors.New("license: unauthorized installer token")
+	ErrEmptyLicenseKey    = errors.New("license: empty key")
+	ErrMissingEmail       = errors.New("license: email address is required")
+	ErrMissingFingerprint = errors.New("license: hardware fingerprint is required")
 )
 
 // Client wraps HTTP access to the license server.
@@ -31,25 +32,36 @@ type Client struct {
 
 // LicenseData represents the persisted license information for a device.
 type LicenseData struct {
-	Key   string `json:"licenseKey"`
-	Email string `json:"email"`
+	Key         string    `json:"licenseKey"`
+	Email       string    `json:"email"`
+	Fingerprint string    `json:"fingerprint"`
+	ExpiresAt   time.Time `json:"expiresAt"`
 }
 
-// Normalise trims whitespace and lowercases the email address.
+// Normalise trims whitespace, uppercases the key and lowercases the email address.
 func (d LicenseData) Normalise() LicenseData {
+	expires := d.ExpiresAt
+	if !expires.IsZero() {
+		expires = expires.UTC().Round(time.Second)
+	}
 	return LicenseData{
-		Key:   strings.TrimSpace(d.Key),
-		Email: strings.ToLower(strings.TrimSpace(d.Email)),
+		Key:         strings.ToUpper(strings.TrimSpace(d.Key)),
+		Email:       strings.ToLower(strings.TrimSpace(d.Email)),
+		Fingerprint: strings.TrimSpace(d.Fingerprint),
+		ExpiresAt:   expires,
 	}
 }
 
-// Validate ensures both the key and email are present.
+// Validate ensures the key, email and fingerprint are present.
 func (d LicenseData) Validate() error {
 	if strings.TrimSpace(d.Key) == "" {
 		return ErrEmptyLicenseKey
 	}
 	if strings.TrimSpace(d.Email) == "" {
 		return ErrMissingEmail
+	}
+	if strings.TrimSpace(d.Fingerprint) == "" {
+		return ErrMissingFingerprint
 	}
 	return nil
 }
@@ -76,33 +88,35 @@ func NewClientFromEnv() (*Client, error) {
 }
 
 // ValidateLicense ensures the provided license key belongs to the supplied email on the server.
-func (c *Client) ValidateLicense(ctx context.Context, licenseKey, email string) error {
+// It returns the expiry timestamp provided by the API.
+func (c *Client) ValidateLicense(ctx context.Context, licenseKey, email, fingerprint string) (time.Time, error) {
 	if c == nil {
-		return errors.New("license: client is nil")
+		return time.Time{}, errors.New("license: client is nil")
 	}
 
-	payload := LicenseData{Key: licenseKey, Email: email}.Normalise()
+	payload := LicenseData{Key: licenseKey, Email: email, Fingerprint: fingerprint}.Normalise()
 	if err := payload.Validate(); err != nil {
-		return err
+		return time.Time{}, err
 	}
 
 	body, err := json.Marshal(map[string]string{
-		"licenseKey": payload.Key,
-		"email":      payload.Email,
+		"licenseKey":  payload.Key,
+		"email":       payload.Email,
+		"fingerprint": payload.Fingerprint,
 	})
 	if err != nil {
-		return err
+		return time.Time{}, err
 	}
 
-	req, err := c.newRequest(ctx, http.MethodPost, "/api/v1/licenses/validate", bytes.NewReader(body))
+	req, err := c.newRequest(ctx, http.MethodPost, "/paystack/validate", bytes.NewReader(body))
 	if err != nil {
-		return err
+		return time.Time{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
-		return err
+		return time.Time{}, err
 	}
 	defer resp.Body.Close()
 
@@ -110,21 +124,30 @@ func (c *Client) ValidateLicense(ctx context.Context, licenseKey, email string) 
 	case http.StatusOK:
 		var result struct {
 			Status    string `json:"status"`
-			ExpiresAt string `json:"expiresAt,omitempty"`
+			ExpiresAt string `json:"expiresAt"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil && !errors.Is(err, io.EOF) {
-			return fmt.Errorf("license: parse response: %w", err)
+			return time.Time{}, fmt.Errorf("license: parse response: %w", err)
 		}
 		if strings.ToLower(strings.TrimSpace(result.Status)) != "valid" {
-			return fmt.Errorf("license: unexpected validation status %q", result.Status)
+			return time.Time{}, fmt.Errorf("license: unexpected validation status %q", result.Status)
 		}
-		return nil
+		if strings.TrimSpace(result.ExpiresAt) == "" {
+			return time.Time{}, errors.New("license: server did not return expiry timestamp")
+		}
+		expires, err := time.Parse(time.RFC3339, result.ExpiresAt)
+		if err != nil {
+			return time.Time{}, fmt.Errorf("license: parse expiry: %w", err)
+		}
+		return expires, nil
 	case http.StatusUnauthorized:
-		return ErrInvalidLicense
+		return time.Time{}, ErrInvalidLicense
 	case http.StatusForbidden:
-		return ErrUnauthorizedToken
+		return time.Time{}, ErrUnauthorizedToken
+	case http.StatusConflict:
+		return time.Time{}, fmt.Errorf("license: payment pending")
 	default:
-		return c.decodeHTTPError(resp)
+		return time.Time{}, c.decodeHTTPError(resp)
 	}
 }
 
@@ -145,7 +168,7 @@ func (c *Client) newRequest(ctx context.Context, method, path string, body io.Re
 		return nil, err
 	}
 	if strings.TrimSpace(c.APIToken) != "" {
-		req.Header.Set("X-Installer-Token", c.APIToken)
+		req.Header.Set("X-License-Token", c.APIToken)
 	}
 	req.Header.Set("Accept", "application/json")
 	return req, nil
@@ -169,8 +192,13 @@ func ValidateLocalLicense(ctx context.Context, client *Client) (LicenseData, err
 	if err != nil {
 		return LicenseData{}, err
 	}
-	if err := client.ValidateLicense(ctx, data.Key, data.Email); err != nil {
+	expiresAt, err := client.ValidateLicense(ctx, data.Key, data.Email, data.Fingerprint)
+	if err != nil {
 		return LicenseData{}, err
+	}
+	data.ExpiresAt = expiresAt
+	if _, err := SaveLicense(data); err != nil {
+		// Updating the cached expiry is best-effort. Validation already succeeded.
 	}
 	normalised := data.Normalise()
 	return normalised, nil

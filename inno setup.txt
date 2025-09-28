@@ -15,7 +15,7 @@ artifacts. Rebuild anything missing.
 | Windows desktop binary | `bin/rankbeam.exe` | Build with `GOOS=windows GOARCH=amd64 go build -o bin/rankbeam.exe ./cmd/app`. |
 | Inno Setup script | `installer/rankbeam.iss` | Updated to collect the subscriber's email and Paystack-issued key. |
 | Desktop icon (optional) | `assets/app.ico`, `assets/app.png` | Replace with branded artwork if desired. |
-| License server source | `server/` | Deployable Go API that responds to Paystack webhooks and validates subscriptions. |
+| Licensing API source | `license-api/` | Node.js service that manages Paystack subscriptions, hardware fingerprints, and licence validation. |
 | Paystack operations playbook | `Paystack licence Guide.txt` | Contains webhook, environment, and rotation procedures. |
 
 2. Build the Desktop Executable (Windows)
@@ -60,16 +60,21 @@ app can validate it on first launch.
 Test the installer on a clean Windows VM. Expect the Paystack activation screen
 during installation; ensure entering a known-good key allows the app to launch.
 
-5. Ship the License Server
---------------------------
-Compile the Go server for your hosting environment and follow the operational
-steps in `Paystack licence Guide.txt`. At minimum you must:
+5. Ship the Licensing API
+-------------------------
+Deploy the Node.js service located in `license-api/` (see `cpanel.txt` and
+`Paystack licence Guide.txt`). Minimum steps:
 
-* Set `LICENSE_API_URL`, `LICENSE_API_TOKEN`, and `PAYSTACK_WEBHOOK_SECRET` on the server.
-* Configure Paystack to post successful subscription renewals to
-  `/api/v1/paystack/webhook`.
-* Ensure outbound email is configured so newly minted license keys reach your
-  customers automatically.
+* Install dependencies (`npm install --production`) and create the SQLite data
+  directory.
+* Configure environment variables: `PORT`, `DATABASE_PATH`,
+  `PAYSTACK_SECRET_KEY`, `PAYSTACK_PLAN_CODE`, `PAYSTACK_WEBHOOK_SECRET`, and
+  `LICENSE_API_TOKEN`.
+* Register the webhook URL `https://your-domain/paystack/webhook` in Paystack
+  so renewals update the licence ledger.
+* Provide HTTPS access to `/paystack/validate`, `/paystack/subscribe`, and
+  `/paystack/deactivate`. The desktop app calls these endpoints with the machine
+  fingerprint.
 
 6. Desktop Environment Variables
 --------------------------------

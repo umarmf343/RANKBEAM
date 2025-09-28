@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func setConfigEnv(t *testing.T, dir string) {
@@ -23,7 +24,8 @@ func TestSaveAndLoadLicense(t *testing.T) {
 	dir := t.TempDir()
 	setConfigEnv(t, dir)
 
-	input := LicenseData{Key: "TEST-KEY-123", Email: "USER@example.COM"}
+	expiry := time.Now().Add(12 * time.Hour).UTC().Truncate(time.Second)
+	input := LicenseData{Key: "test-key-123", Email: "USER@example.COM", Fingerprint: "DEVICE123", ExpiresAt: expiry}
 	savedPath, err := SaveLicense(input)
 	if err != nil {
 		t.Fatalf("SaveLicense error: %v", err)
@@ -48,8 +50,11 @@ func TestSaveAndLoadLicense(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadLicense error: %v", err)
 	}
-	if loaded.Key != "TEST-KEY-123" || loaded.Email != "user@example.com" {
+	if loaded.Key != "TEST-KEY-123" || loaded.Email != "user@example.com" || loaded.Fingerprint != "DEVICE123" {
 		t.Fatalf("unexpected loaded data: %+v", loaded)
+	}
+	if loaded.ExpiresAt.IsZero() {
+		t.Fatalf("expected expiry to be set")
 	}
 }
 
@@ -114,5 +119,17 @@ func TestLoadLicenseMissingFields(t *testing.T) {
 	_, err = LoadLicense()
 	if !errors.Is(err, ErrEmptyLicenseKey) {
 		t.Fatalf("expected ErrEmptyLicenseKey, got %v", err)
+	}
+
+	encoded, err = json.Marshal(LicenseData{Key: "KEY", Email: "user@example.com"})
+	if err != nil {
+		t.Fatalf("marshal fingerprint test: %v", err)
+	}
+	if err := os.WriteFile(path, encoded, 0o600); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	_, err = LoadLicense()
+	if !errors.Is(err, ErrMissingFingerprint) {
+		t.Fatalf("expected ErrMissingFingerprint, got %v", err)
 	}
 }

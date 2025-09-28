@@ -47,7 +47,8 @@ func licenseErrorMessage(err error) string {
 		return "License details not found. Please complete activation to unlock the app."
 	case errors.Is(err, license.ErrEmptyLicenseFile),
 		errors.Is(err, license.ErrEmptyLicenseKey),
-		errors.Is(err, license.ErrMissingEmail):
+		errors.Is(err, license.ErrMissingEmail),
+		errors.Is(err, license.ErrMissingFingerprint):
 		return "The stored license details are incomplete. Re-run activation with a valid email and key."
 	case errors.Is(err, license.ErrInvalidLicense):
 		return "The license key on this machine is invalid or expired. Renew your subscription to continue."
@@ -146,6 +147,12 @@ func renderLicenseFailure(window fyne.Window, client *license.Client, message st
 			return
 		}
 
+		fingerprint, fpErr := license.HardwareFingerprint()
+		if fpErr != nil {
+			dialog.ShowError(fmt.Errorf("unable to determine hardware fingerprint: %w", fpErr), window)
+			return
+		}
+
 		activationInProgress = true
 		updateSubmitButtonState()
 		statusLabel.SetText("Validating your subscription…")
@@ -154,9 +161,9 @@ func renderLicenseFailure(window fyne.Window, client *license.Client, message st
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 			defer cancel()
 
-			err := client.ValidateLicense(ctx, key, email)
+			expiresAt, err := client.ValidateLicense(ctx, key, email, fingerprint)
 			if err == nil {
-				_, err = license.SaveLicense(license.LicenseData{Key: key, Email: email})
+				_, err = license.SaveLicense(license.LicenseData{Key: key, Email: email, Fingerprint: fingerprint, ExpiresAt: expiresAt})
 			}
 
 			queueOnMain(window, func() {
@@ -229,6 +236,7 @@ func activationErrorMessage(err error) string {
 		errors.Is(err, license.ErrEmptyLicenseFile),
 		errors.Is(err, license.ErrEmptyLicenseKey),
 		errors.Is(err, license.ErrMissingEmail),
+		errors.Is(err, license.ErrMissingFingerprint),
 		errors.Is(err, license.ErrUnauthorizedToken):
 		return licenseErrorMessage(err)
 	case errors.Is(err, os.ErrPermission):

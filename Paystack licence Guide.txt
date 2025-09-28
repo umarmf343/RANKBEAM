@@ -1,197 +1,202 @@
-Paystack Subscription Licence Playbook
-======================================
+RankBeam Paystack Licensing Blueprint
+====================================
 
-This guide explains how the new Paystack-backed licensing flow works, how to
-deploy it, and what actions you must take after these code changes.
+This guide describes the Paystack-backed licensing service that replaces the
+legacy Go activation server. The new stack uses a Node.js API, a SQLite
+backing store, and hardware fingerprints to bind every subscription to a single
+machine. Keep this document close when configuring infrastructure, support
+workflows, or debugging activations.
 
 Contents
 --------
-1. Overview of the new licence architecture
+1. System overview
 2. Paystack configuration checklist
-3. Server environment variables
-4. Local testing workflow
-5. Deployment and operations
-6. Email delivery requirements
-7. Desktop and installer updates
-8. What to do next
+3. Service endpoints
+4. Database schema
+5. Environment variables
+6. Local testing workflow
+7. Desktop & installer requirements
+8. Operations and maintenance
 
-1. Overview of the new licence architecture
--------------------------------------------
-* Paystack is the source of truth for billing. Every successful payment (initial
-  charge or renewal) triggers a webhook.
-* The Go server in the `server/` folder stores one licence record per payment in
-  `data/licenses.db` (SQLite). Each record tracks:
-  - `key`: hashed email + hashed transaction reference + expiry date.
-  - `customer_email`: normalised, lower-cased email address.
-  - `transaction_ref`: Paystack transaction reference.
-  - `expires_at`: payment date + 30 days.
-  - `created_at`: audit timestamp.
-* The webhook handler (`POST /api/v1/paystack/webhook`) verifies the
-  `x-paystack-signature` header, generates the licence key, saves it, and emails
-  the customer.
-* Licence validation (`POST /api/v1/licenses/validate`) now accepts the licence
-  key and email address. Hardware fingerprints are no longer used.
-* Desktop clients and the installer save the licence data to
-  `%LOCALAPPDATA%\RankBeam\license.json` and call the validation endpoint at
-  startup.
-
-Licence key format
-~~~~~~~~~~~~~~~~~~
-`<email sha256 prefix><reference sha256 prefix>-<expiry date>` e.g.
-`0f4a8c1a2d5b3e7b1c2d-9b3f2d7a1c4e-2024-12-01`. Each key is valid for 30 days.
+1. System overview
+------------------
+* `license-api/server.js` is the only licensing backend. It exposes REST
+  endpoints for subscription checkout, webhook processing, validation, health
+  checks, and device deactivation.
+* Paystack handles all billing. The API creates a transaction via
+  `/transaction/initialize` and encodes the generated licence key and hardware
+  fingerprint inside the metadata payload.
+* Every successful Paystack webhook (`subscription.create`, `charge.success`,
+  `invoice.create`, `subscription.renew`) updates the SQLite database with the
+  latest expiry timestamp (payment date + 30 days) and marks the licence as
+  `active`.
+* Desktop apps send three pieces of data to `/paystack/validate` on every
+  launch: `licenseKey`, `email`, and the machine fingerprint. The API confirms
+  the combination, checks the expiry window, and returns the canonical expiry
+  date.
+* Deactivations wipe the stored fingerprint so the end user can reactivate on a
+  different computer after signing in again.
 
 2. Paystack configuration checklist
 -----------------------------------
-1. **Create a subscription plan** (if you have not already) with the desired
-   monthly amount (e.g. 6500 NGN).
-2. **Set up Paystack webhooks**:
-   - Dashboard → **Settings → API Keys & Webhooks**.
-   - Add your production webhook URL:
-     `https://<your-domain>/api/v1/paystack/webhook`.
-   - Copy the webhook signing secret. Store it in `PAYSTACK_WEBHOOK_SECRET`.
-3. **Metadata to send**: ensure the customer’s email address is present in the
-   webhook payload (`data.customer.email`). The transaction reference is sent by
-   default.
-4. **Test mode**: use the sandbox keys while verifying end-to-end. The server
-   does not talk to Paystack directly; it trusts webhook notifications after
-   signature verification.
+1. Create a recurring subscription **plan** in the Paystack dashboard with the
+   required monthly price. Capture the `plan` code (e.g. `PLN_xxxxxx`).
+2. Navigate to **Settings → API Keys & Webhooks** and configure the production
+   webhook URL: `https://<your-domain>/paystack/webhook`.
+3. Copy the webhook signing secret and store it in `PAYSTACK_WEBHOOK_SECRET`.
+4. Enable email collection on the checkout form. The API relies on
+   `data.customer.email`.
+5. (Optional) Add `metadata` fields for troubleshooting. The service already
+   injects `licenseKey` and `fingerprint` so support can trace payments back to
+   machines.
 
-3. Server environment variables
--------------------------------
-Configure these variables in `.env` (or your process manager). Values shown are
-examples:
+3. Service endpoints
+--------------------
+`server.js` exposes:
+
+* `POST /paystack/subscribe`
+  * Body: `{ email, fingerprint, planCode? }`
+  * Generates a licence key, creates a Paystack transaction, stores a pending
+    record, and returns the Paystack authorization URL plus the reference.
+* `POST /paystack/validate`
+  * Requires the shared token header (`X-License-Token`).
+  * Body: `{ email, licenseKey, fingerprint }`
+  * Confirms the subscription is active, the fingerprint matches, and returns
+    `{ status: "valid", expiresAt }`.
+* `POST /paystack/deactivate`
+  * Requires the shared token header.
+  * Clears the fingerprint so the licence can be reused on another device.
+* `POST /paystack/webhook`
+  * Expects a signed Paystack payload.
+  * Processes subscription creation, renewals, and successful charges. Updates
+    the licence expiry to payment timestamp + 30 days.
+* `GET /health`
+  * Basic JSON heartbeat: `{ status: "ok", timestamp: ... }`.
+
+4. Database schema
+------------------
+The service uses SQLite via `better-sqlite3`. The `licenses` table stores one
+row per licence key:
 
 ```
-LICENSE_BIND_ADDR=:8080
-LICENSE_DB_PATH=/home/youruser/license-server/data/licenses.db
+CREATE TABLE licenses (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_email TEXT NOT NULL,
+  license_key TEXT NOT NULL UNIQUE,
+  fingerprint TEXT,
+  expires_at TEXT,
+  paystack_reference TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+```
+
+Status transitions:
+
+* `pending` – customer started checkout, waiting for Paystack confirmation.
+* `active` – paid and tied to a fingerprint.
+* `expired` – expiry timestamp is in the past.
+* `deactivated` – fingerprint cleared by the user or support.
+
+A background cron job (or the included `clearExpiredFingerprints()` helper) can
+periodically mark expired rows. Validation also promotes stale rows to
+`expired` when the expiry window passes.
+
+5. Environment variables
+------------------------
+Set these variables in production and testing (see `license-api/.env.example`):
+
+```
+PORT=8080
+DATABASE_PATH=/home/<user>/license-api/data/licenses.db
+PAYSTACK_SECRET_KEY=sk_live_xxx
+PAYSTACK_PLAN_CODE=PLN_xxxxxx
+PAYSTACK_WEBHOOK_SECRET=whsec_xxx
 LICENSE_API_TOKEN=installer-shared-secret
-PAYSTACK_WEBHOOK_SECRET=whsec_live_secret_from_dashboard
-SMTP_HOST=smtp.yourmailhost.com
-SMTP_PORT=465
-SMTP_USERNAME=postmaster@yourdomain.com
-SMTP_PASSWORD=app-specific-password
-SMTP_FROM=RankBeam Support <support@yourdomain.com>
 ```
 
-* `LICENSE_API_TOKEN` protects the `/api/v1/licenses/validate` endpoint. The
-  desktop app/installer must supply the same value via the `X-Installer-Token`
-  header.
-* The SMTP settings enable the server to email licence keys immediately after a
-  payment clears. Port `465` expects SMTPS. Provide an app-specific password if
-  your provider requires one.
+* `PAYSTACK_SECRET_KEY` – used for the `transaction/initialize` call.
+* `PAYSTACK_PLAN_CODE` – monthly subscription plan code.
+* `PAYSTACK_WEBHOOK_SECRET` – Paystack signature verification.
+* `LICENSE_API_TOKEN` – shared secret between installer, desktop app, and the
+  validation API.
+* `DATABASE_PATH` – absolute path to the SQLite database file.
 
-4. Local testing workflow
+6. Local testing workflow
 -------------------------
-1. Copy `.env.example` to `.env` inside the `server/` directory and fill in test
-   values.
-2. Start the server: `go run .`
-3. Simulate a Paystack event (replace the signature command with one that uses
-   your test secret):
+1. Copy `license-api/.env.example` to `.env` and fill in sandbox credentials.
+2. Install dependencies: `cd license-api && npm install`.
+3. Start the API: `npm run dev` (or `npm start`).
+4. Initiate a subscription:
 
 ```
-curl -X POST http://localhost:8080/api/v1/paystack/webhook \
+curl -X POST http://localhost:8080/paystack/subscribe \
   -H "Content-Type: application/json" \
-  -H "x-paystack-signature: $(printf 'payload' | openssl dgst -sha512 -hmac whsec_test_secret | cut -d' ' -f2)" \
-  -d '{
-        "event": "subscription.create",
-        "data": {
-          "reference": "TEST_REF_001",
-          "paid_at": "2024-11-01T12:00:00Z",
-          "customer": {"email": "tester@example.com"}
-        }
-      }'
+  -d '{"email":"tester@example.com","fingerprint":"TEST-FP-001"}'
 ```
 
-4. Inspect the response—it includes `licenseKey` and `expiresAt`.
-5. Validate the licence:
+   Capture the `authorizationUrl` and visit it with Paystack test cards.
+5. Simulate a webhook (replace the signature with one generated using your test
+   webhook secret):
 
 ```
-curl -X POST http://localhost:8080/api/v1/licenses/validate \
+payload='{"event":"charge.success","data":{"paid_at":"2024-01-01T12:00:00Z","reference":"TEST_REF","customer":{"email":"tester@example.com"},"metadata":{"licenseKey":"XYZ","fingerprint":"TEST-FP-001"}}}'
+curl -X POST http://localhost:8080/paystack/webhook \
   -H "Content-Type: application/json" \
-  -H "X-Installer-Token: installer-shared-secret" \
-  -d '{"licenseKey":"<key-from-webhook>","email":"tester@example.com"}'
+  -H "x-paystack-signature: $(printf "%s" "$payload" | openssl dgst -sha512 -hmac whsec_test | cut -d' ' -f2)" \
+  -d "$payload"
 ```
 
-You should receive `{"status":"valid"}`.
-
-5. Deployment and operations
-----------------------------
-1. **Build the binary** for your target platform. Example for Linux:
+6. Validate the licence:
 
 ```
-GOOS=linux GOARCH=amd64 go build -o build/license-server ./server
+curl -X POST http://localhost:8080/paystack/validate \
+  -H "Content-Type: application/json" \
+  -H "X-License-Token: installer-shared-secret" \
+  -d '{"email":"tester@example.com","licenseKey":"XYZ","fingerprint":"TEST-FP-001"}'
 ```
 
-2. **Create the deployment structure** on your server:
+   Response: `{ "status": "valid", "expiresAt": "2024-01-31T12:00:00Z" }`.
 
-```
-license-server/
-  license-server        # compiled binary
-  .env                  # environment variables
-  data/                 # SQLite database lives here
-  logs/                 # optional log directory
-```
-
-3. **Process manager** options:
-   - systemd service (on VPS).
-   - cPanel Application Manager (Passenger) or Cron `@reboot` job.
-   - Docker container if you prefer.
-4. **Reverse proxy**: expose the binary via HTTPS using nginx/Apache or your
-   host’s proxy features. Point Paystack to the public URL.
-5. **Logging**: capture stdout/stderr to a file. Monitor for `send license email`
-   warnings or database errors.
-6. **Backups**: schedule a job to copy `data/licenses.db` off the server every
-   night. SQLite files can be backed up via simple file copy when the service is
-   stopped or by using `sqlite3 .backup` commands.
-
-6. Email delivery requirements
-------------------------------
-* Provide valid SMTP credentials. The code opens an SMTPS connection (TLS) to
-  `SMTP_HOST:SMTP_PORT` and authenticates with PlainAuth if username/password are
-  supplied.
-* The email template is plain text and includes the licence key and expiry
-  timestamp.
-* If you use transactional providers (SendGrid, Mailgun, Postmark), create an
-  SMTP credential and supply it through the environment variables above.
-* Monitor bounces. The server logs `send license email: ...` if delivery fails.
-  Consider integrating with your provider’s event webhooks for better insight.
-
-7. Desktop and installer updates
---------------------------------
-* The installer (`installer/rankbeam.iss`) now prompts users for their
-  subscription email and the Paystack-generated licence key.
-* Licence details are saved as JSON to `%LOCALAPPDATA%\RankBeam\license.json` so
-  the desktop app can validate them on launch.
-* The desktop UI has been updated to request the same information if the stored
-  licence becomes invalid or expires.
-* Environment variables used by the desktop build:
+7. Desktop & installer requirements
+-----------------------------------
+* The desktop application now generates a SHA-256 hardware fingerprint (via the
+  `github.com/denisbrodbeck/machineid` package). Activation sends the
+  fingerprint with every validation call and caches it alongside the licence key
+  and expiry in `%LOCALAPPDATA%\RankBeam\license.json` (or the XDG config
+  directory on macOS/Linux).
+* The activation dialog refuses to continue unless a fingerprint is available,
+  ensuring each key is bound to one device at a time.
+* The Windows installer must prompt for the licence key and email, then call
+  `/paystack/validate` with the machine fingerprint before copying files.
+* Environment variables required for packaging the desktop app:
 
 ```
 LICENSE_API_URL=https://licensing.yourdomain.com
 LICENSE_API_TOKEN=installer-shared-secret
 ```
 
-Ensure these values match your production server before packaging.
+8. Operations and maintenance
+-----------------------------
+* **Deployment**: Push the contents of `license-api/` to your server (or cPanel
+  Node.js app). Run `npm install`, set the environment variables, and start the
+  process with PM2, Passenger, systemd, or your host's process manager.
+* **Backups**: Copy `data/licenses.db` daily. SQLite can be snapshotted by
+  stopping the service or using the `.backup` command.
+* **Monitoring**: Capture stdout/stderr logs. Look for `invalid signature` or
+  `fingerprint mismatch` events, which usually indicate tampering attempts or
+  users trying to reuse licences.
+* **Deactivation workflow**: Offer a simple dashboard or support command that
+  calls `POST /paystack/deactivate` with the licence key. Once the fingerprint
+  clears, the customer can reactivate on another machine.
+* **Cron jobs**: Schedule a task (e.g. hourly) that curls
+  `https://<your-domain>/health` to confirm the API responds. Optionally run a
+  script that triggers `clearExpiredFingerprints()` (see `server.js`) if you
+  prefer an external expiry sweep.
+* **Security**: Treat `LICENSE_API_TOKEN` like a password. Rotate it if the
+  installer leaks, and redeploy the desktop app with the new token.
 
-8. What to do next
-------------------
-1. **Set environment variables**: populate `.env` (or your hosting control panel)
-   with the values listed in section 3, especially the SMTP and Paystack
-   secrets.
-2. **Configure Paystack webhooks**: point them to the deployed server and paste
-   the signing secret into `PAYSTACK_WEBHOOK_SECRET`.
-3. **Test email delivery**: use Paystack’s test mode or the local curl command
-   to verify that real emails reach your inbox. Adjust SPF/DKIM records if
-   messages land in spam.
-4. **Rebuild the Windows installer**: run through the updated steps in
-   `inno setup.txt` so users see the new activation screen.
-5. **Deploy the updated desktop app**: compile with the correct API URL/token and
-   replace any previous builds.
-6. **Update documentation for your team**: share this guide and the quickstart
-   (`serve guide.txt`) so everyone understands the new subscription flow.
-7. **Plan operational monitoring**: set up alerts for webhook failures, database
-   backup jobs, and SMTP errors.
-
-Once these tasks are complete, every Paystack renewal will automatically mint a
-new licence key, email it to the subscriber, and allow the desktop app to verify
-access for the next 30 days.
+This blueprint supersedes all Go-based licensing documentation. Follow it to
+keep RankBeam activations in sync with Paystack subscriptions and to maintain a
+secure, hardware-bound entitlement system.

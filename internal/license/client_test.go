@@ -7,11 +7,12 @@ import (
 	"net/http/httptest"
 	"runtime"
 	"testing"
+	"time"
 )
 
 func TestValidateLicense(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/licenses/validate" {
+		if r.URL.Path != "/paystack/validate" {
 			t.Fatalf("unexpected path %s", r.URL.Path)
 		}
 		var payload map[string]string
@@ -24,9 +25,12 @@ func TestValidateLicense(t *testing.T) {
 		if payload["licenseKey"] != "KEY" {
 			t.Fatalf("unexpected license key %s", payload["licenseKey"])
 		}
+		if payload["fingerprint"] != "ABC123" {
+			t.Fatalf("unexpected fingerprint %s", payload["fingerprint"])
+		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]string{"status": "valid"})
+		json.NewEncoder(w).Encode(map[string]string{"status": "valid", "expiresAt": time.Now().Add(30 * 24 * time.Hour).Format(time.RFC3339)})
 	}))
 	defer srv.Close()
 
@@ -35,8 +39,12 @@ func TestValidateLicense(t *testing.T) {
 		t.Fatalf("NewClient error: %v", err)
 	}
 
-	if err := client.ValidateLicense(context.Background(), "KEY", "user@example.com"); err != nil {
+	expiresAt, err := client.ValidateLicense(context.Background(), "KEY", "user@example.com", "ABC123")
+	if err != nil {
 		t.Fatalf("ValidateLicense unexpected error: %v", err)
+	}
+	if expiresAt.IsZero() {
+		t.Fatalf("expected non-zero expiry")
 	}
 }
 
@@ -51,7 +59,7 @@ func TestValidateLicenseInvalid(t *testing.T) {
 		t.Fatalf("NewClient error: %v", err)
 	}
 
-	err = client.ValidateLicense(context.Background(), "KEY", "user@example.com")
+	_, err = client.ValidateLicense(context.Background(), "KEY", "user@example.com", "ABC123")
 	if err != ErrInvalidLicense {
 		t.Fatalf("expected ErrInvalidLicense, got %v", err)
 	}
@@ -65,12 +73,14 @@ func TestValidateLocalLicense(t *testing.T) {
 		t.Setenv("XDG_CONFIG_HOME", dir)
 	}
 
-	if _, err := SaveLicense(LicenseData{Key: "LOCAL-KEY", Email: "User@example.com"}); err != nil {
+	fingerprint := "LOCALFP"
+	if _, err := SaveLicense(LicenseData{Key: "LOCAL-KEY", Email: "User@example.com", Fingerprint: fingerprint}); err != nil {
 		t.Fatalf("SaveLicense: %v", err)
 	}
 
+	expiry := time.Now().Add(30 * 24 * time.Hour).Truncate(time.Second)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/licenses/validate" {
+		if r.URL.Path != "/paystack/validate" {
 			t.Fatalf("unexpected path %s", r.URL.Path)
 		}
 		var payload map[string]string
@@ -83,8 +93,11 @@ func TestValidateLocalLicense(t *testing.T) {
 		if payload["email"] != "user@example.com" {
 			t.Fatalf("unexpected email %s", payload["email"])
 		}
+		if payload["fingerprint"] != fingerprint {
+			t.Fatalf("unexpected fingerprint %s", payload["fingerprint"])
+		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"status": "valid"})
+		json.NewEncoder(w).Encode(map[string]string{"status": "valid", "expiresAt": expiry.Format(time.RFC3339)})
 	}))
 	defer srv.Close()
 
@@ -97,7 +110,10 @@ func TestValidateLocalLicense(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ValidateLocalLicense error: %v", err)
 	}
-	if data.Key != "LOCAL-KEY" || data.Email != "user@example.com" {
+	if data.Key != "LOCAL-KEY" || data.Email != "user@example.com" || data.Fingerprint != fingerprint {
 		t.Fatalf("unexpected license data: %+v", data)
+	}
+	if data.ExpiresAt.IsZero() {
+		t.Fatalf("expected expiry to be set")
 	}
 }

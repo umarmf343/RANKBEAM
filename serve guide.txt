@@ -1,100 +1,108 @@
-RankBeam License Server Quickstart (Paystack Edition)
-====================================================
+RankBeam Licensing API Quickstart
+================================
 
-This beginner-friendly note explains how to run the updated RankBeam license
-server, connect it to Paystack subscriptions, and test license validation end to
-end. Read `Paystack licence Guide.txt` for full operational checklists; use this
-file when you just need a high-level walkthrough.
+Use this fast-start checklist to spin up the new Node.js licensing service,
+connect it to Paystack, and test activations from end to end. For deeper
+operational details see `Paystack licence Guide.txt`.
 
-1. What the license server does
--------------------------------
-* Listens for Paystack webhooks at `POST /api/v1/paystack/webhook`.
-* Stores license rows in `data/licenses.db` with fields: license key, customer
-  email, Paystack transaction reference, expiry timestamp (30 days from the
-  payment date), and audit timestamps.
-* Validates licenses via `POST /api/v1/licenses/validate` using the key + email
-  combination. Hardware fingerprints are no longer required.
-
-2. Configure the server locally
--------------------------------
-Create a `.env` file inside the `server/` directory with your development values:
-
-```dotenv
-LICENSE_BIND_ADDR=:8080
-LICENSE_DB_PATH=data/licenses.db
-LICENSE_API_TOKEN=dev-installer-token
-PAYSTACK_WEBHOOK_SECRET=whsec_test_secret
-```
-
-Run the API:
-
-```bash
-cd server
-go run .
-```
-
-You should see `license server listening on :8080`.
-
-3. Simulate a Paystack webhook
+1. What the licensing API does
 ------------------------------
-With the server running, post a fake successful payment event. The body must
-match Paystack’s JSON structure and include `customer.email`, `reference`, and
-`data.paid_at`.
+* `license-api/server.js` boots an Express app that exposes:
+  * `POST /paystack/subscribe` – generate a licence key, create a Paystack
+    checkout session, and store a pending record.
+  * `POST /paystack/webhook` – accept signed Paystack events, activate licences,
+    and set expiry to payment timestamp + 30 days.
+  * `POST /paystack/validate` – confirm `email + licenseKey + fingerprint` are
+    in good standing and return the current expiry.
+  * `POST /paystack/deactivate` – clear the fingerprint so the user can move to
+    another machine.
+  * `GET /health` – lightweight heartbeat endpoint.
+* Licences are persisted in `license-api/data/licenses.db` (SQLite) using the
+  `better-sqlite3` driver. Fingerprints are required for every validation.
+
+2. Configure the service locally
+--------------------------------
+1. Copy `license-api/.env.example` to `license-api/.env` and fill in sandbox
+   keys.
+2. Install dependencies and start the watcher:
 
 ```bash
-curl -X POST http://localhost:8080/api/v1/paystack/webhook \
-  -H "Content-Type: application/json" \
-  -H "x-paystack-signature: $(printf 'test' | openssl dgst -sha512 -hmac whsec_test_secret | cut -d' ' -f2)" \
-  -d '{
-        "event": "charge.success",
-        "data": {
-          "reference": "PSK_demo_001",
-          "paid_at": "2024-11-01T12:00:00Z",
-          "customer": {"email": "buyer@example.com"}
-        }
-      }'
+cd license-api
+npm install
+npm run dev
 ```
 
-The response includes a freshly minted license key and its expiry date.
+   The console prints `RankBeam licensing API listening on port 8080`.
 
-4. Validate the stored license
-------------------------------
-Call the validation endpoint with the license key from the previous step:
+3. Start a subscription checkout
+--------------------------------
+Trigger the `subscribe` endpoint with a test email and fingerprint:
 
 ```bash
-curl -X POST http://localhost:8080/api/v1/licenses/validate \
+curl -X POST http://localhost:8080/paystack/subscribe \
   -H "Content-Type: application/json" \
-  -H "X-Installer-Token: dev-installer-token" \
-  -d '{"licenseKey":"<KEY_FROM_WEBHOOK>","email":"buyer@example.com"}'
+  -d '{"email":"buyer@example.com","fingerprint":"DEV-FP-001"}'
+```
+
+The JSON response includes `authorizationUrl`, `reference`, and `licenseKey`.
+Open the authorization URL in a browser and complete the Paystack sandbox
+payment (use the default test card 4084 0840 8408 4081 / 408). Paystack will hit
+your local webhook if you use a tunnelling tool such as `ngrok`.
+
+4. Simulate a webhook manually (optional)
+----------------------------------------
+If you prefer not to tunnel, craft a fake webhook payload and sign it with your
+sandbox secret:
+
+```bash
+payload='{"event":"charge.success","data":{"paid_at":"2024-11-01T12:00:00Z","reference":"TEST_REF_001","customer":{"email":"buyer@example.com"},"metadata":{"licenseKey":"DEV-LIC-001","fingerprint":"DEV-FP-001"}}}'
+curl -X POST http://localhost:8080/paystack/webhook \
+  -H "Content-Type: application/json" \
+  -H "x-paystack-signature: $(printf "%s" "$payload" | openssl dgst -sha512 -hmac $PAYSTACK_WEBHOOK_SECRET | cut -d' ' -f2)" \
+  -d "$payload"
+```
+
+The API responds with `{ "status": "processed", ... }` and updates the SQLite
+record to `active`.
+
+5. Validate the licence from the desktop/installer perspective
+-------------------------------------------------------------
+Call the validation endpoint using the shared token and the hardware
+fingerprint:
+
+```bash
+curl -X POST http://localhost:8080/paystack/validate \
+  -H "Content-Type: application/json" \
+  -H "X-License-Token: installer-shared-secret" \
+  -d '{"email":"buyer@example.com","licenseKey":"DEV-LIC-001","fingerprint":"DEV-FP-001"}'
 ```
 
 Expected response:
 
 ```json
-{"status":"valid"}
+{"status":"valid","expiresAt":"2024-12-01T12:00:00Z"}
 ```
 
-If you supply an expired or mismatched key/email, the API returns `401`.
+6. Deploying to production or cPanel
+------------------------------------
+* Upload the `license-api/` folder to your server.
+* Run `npm install --production` and ensure the process has write access to
+  `data/`.
+* Configure environment variables (see `license-api/.env.example`).
+* Start the app with your preferred process manager (PM2, systemd, cPanel
+  Application Manager/Passenger). Point your HTTPS reverse proxy to the chosen
+  port.
+* Register the webhook URL in Paystack → **Settings → API Keys & Webhooks**.
 
-5. Deploying to production
---------------------------
-* Cross-compile the binary for Linux: `GOOS=linux GOARCH=amd64 go build -o build/license-server ./server`.
-* Upload the binary plus `.env` file to your server or hosting account.
-* Ensure the process runs with write access to the directory that holds
-  `data/licenses.db`.
-* Expose the binary behind HTTPS (NGINX, cPanel Application Manager, or any
-  reverse proxy works).
-* Configure Paystack Dashboard → **Settings → API Keys & Webhooks** to send
-  successful subscription events to your public webhook URL.
+7. Maintenance tips
+-------------------
+* Back up `data/licenses.db` frequently; it contains the licence ledger.
+* Rotate `LICENSE_API_TOKEN` if a build leaks. Update the desktop app/installer
+  before flipping the value in production.
+* Provide support staff with a small script or API client that calls
+  `POST /paystack/deactivate` so customers can move to new devices.
+* Monitor logs for `invalid signature`, `fingerprint mismatch`, or `subscription
+  expired` responses—they often indicate billing issues that need follow-up.
 
-6. Ongoing maintenance tips
----------------------------
-* Back up `data/licenses.db` weekly. A simple tarball copied off the server is
-  enough because SQLite is self-contained.
-* Rotate `PAYSTACK_WEBHOOK_SECRET` and `LICENSE_API_TOKEN` periodically; update
-  the environment and restart the service.
-* Monitor logs for `invalid signature` or `license expired` messages—they often
-  point to billing issues that need follow-up with the subscriber.
-
-With these steps you have a working Paystack-integrated licensing backend that
-the desktop app and installer can trust.
+Follow these steps to keep the RankBeam activation flow tightly aligned with the
+new Paystack-powered licensing backend.
