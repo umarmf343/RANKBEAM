@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha512"
 	"crypto/subtle"
@@ -8,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -17,13 +19,15 @@ type LicenseHandler struct {
 	store         *LicenseStore
 	token         string
 	webhookSecret string
+	mailer        Mailer
 }
 
-func NewLicenseHandler(store *LicenseStore, token, webhookSecret string) *LicenseHandler {
+func NewLicenseHandler(store *LicenseStore, token, webhookSecret string, mailer Mailer) *LicenseHandler {
 	return &LicenseHandler{
 		store:         store,
 		token:         strings.TrimSpace(token),
 		webhookSecret: strings.TrimSpace(webhookSecret),
+		mailer:        mailer,
 	}
 }
 
@@ -74,6 +78,14 @@ func (h *LicenseHandler) HandlePaystackWebhook(w http.ResponseWriter, r *http.Re
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
+	}
+
+	if h.mailer != nil {
+		mailCtx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+		if err := h.mailer.SendLicenseEmail(mailCtx, email, license); err != nil {
+			log.Printf("send license email: %v", err)
+		}
+		cancel()
 	}
 
 	w.Header().Set("Content-Type", "application/json")

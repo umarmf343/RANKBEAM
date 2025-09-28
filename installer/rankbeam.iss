@@ -1,9 +1,7 @@
-#define LicenseApiBaseUrl "https://rankbeam.hannyshive.com.ng"
-#define LicenseApiToken "F6BFD62E2CD91CED258005CBDE1FED2423DBD8775F2430A75F882CDF3ADC6750"
 #define LicenseStorageSubDir "RankBeam"
-#define LicenseFileName "license.key"
+#define LicenseFileName "license.json"
 
-; RankBeam Installer with License Activation
+; RankBeam Installer with Paystack Subscription Activation
 ; Generated for building a Windows setup package using Inno Setup
 
 [Setup]
@@ -24,7 +22,6 @@ ArchitecturesInstallIn64BitMode=x64compatible
 
 [Files]
 Source: "..\bin\rankbeam.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\bin\fingerprint-helper.exe"; DestDir: "{tmp}"; Flags: ignoreversion deleteafterinstall
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
@@ -70,188 +67,100 @@ begin
   end;
 end;
 
-function ExtractJsonValue(const Json, Key: string): string;
-var
-  Pattern, Tail: string;
-  ColonPos, QuotePos, EndPos: Integer;
+function NormaliseEmail(const Value: string): string;
 begin
-  Result := '';
-  Pattern := '"' + Key + '"';
-  QuotePos := Pos(Pattern, Json);
-  if QuotePos = 0 then
-    Exit;
-  Tail := Copy(Json, QuotePos + Length(Pattern), MaxInt);
-  ColonPos := Pos(':', Tail);
-  if ColonPos = 0 then
-    Exit;
-  Tail := Trim(Copy(Tail, ColonPos + 1, MaxInt));
-  if (Tail = '') or (Tail[1] <> '"') then
-    Exit;
-  Tail := Copy(Tail, 2, MaxInt);
-  EndPos := Pos('"', Tail);
-  if EndPos = 0 then
-    Exit;
-  Result := Copy(Tail, 1, EndPos - 1);
-end;
-
-function StripHtmlTags(const Value: string): string;
-var
-  I: Integer;
-  InTag: Boolean;
-  Ch: Char;
-begin
-  Result := '';
-  InTag := False;
-  for I := 1 to Length(Value) do
-  begin
-    Ch := Value[I];
-    case Ch of
-      '<': InTag := True;
-      '>':
-        if InTag then
-          InTag := False
-        else
-          Result := Result + Ch;
-    else
-      if not InTag then
-        Result := Result + Ch;
-    end;
-  end;
-  Result := Trim(Result);
-end;
-
-function FormatErrorResponse(const ResponseText: string): string;
-var
-  Sanitized: string;
-begin
-  Sanitized := StripHtmlTags(ResponseText);
-  if Sanitized = '' then
-    Result := 'The activation server returned no additional details.'
-  else
-  begin
-    if Length(Sanitized) > 200 then
-      Sanitized := Copy(Sanitized, 1, 200) + '…';
-    Result := Sanitized;
-  end;
+  Result := LowerCase(Trim(Value));
 end;
 
 function GetCustomerEmail(): string;
 begin
-  Result := Trim(CustomerInfoPage.Values[0]);
+  Result := NormaliseEmail(CustomerInfoPage.Values[0]);
 end;
 
-function GetMachineFingerprint(): string;
-var
-  ResultCode: Integer;
-  OutputPath: string;
-  Output: AnsiString;
+function GetLicenseKey(): string;
 begin
-  OutputPath := ExpandConstant('{tmp}') + '\\fingerprint.out';
-  if FileExists(OutputPath) then
-    DeleteFile(OutputPath);
-
-  if not Exec(ExpandConstant('{tmp}') + '\\fingerprint-helper.exe', '--output ' + AddQuotes(OutputPath), '', SW_HIDE,
-    ewWaitUntilTerminated, ResultCode) then
-  begin
-    RaiseException('Unable to start fingerprint helper.');
-  end;
-  if ResultCode <> 0 then
-    RaiseException('Fingerprint helper exited with code ' + IntToStr(ResultCode) + '.');
-
-  if not LoadStringFromFile(OutputPath, Output) then
-    RaiseException('Failed to read fingerprint output.');
-
-  Result := Trim(Output);
-  if Result = '' then
-    RaiseException('Fingerprint helper returned an empty fingerprint.');
-
-  Log(Format('Derived machine fingerprint %s', [Result]));
+  Result := Trim(CustomerInfoPage.Values[1]);
 end;
 
-function RequestLicenseFromServer(const Fingerprint: string): string;
+procedure PersistLicenseDetails(const Email, Key: string);
 var
-  WinHttpReq: Variant;
-  Url, Payload, Email: string;
-  Status: Integer;
+  StoragePath, StorageDir, Payload: string;
 begin
-  Email := GetCustomerEmail();
-  if Email = '' then
-    RaiseException('Email address is required for license activation.');
+  if Trim(Key) = '' then
+    RaiseException('License key is required.');
+  if Trim(Email) = '' then
+    RaiseException('Subscription email is required.');
 
-  Url := '{#LicenseApiBaseUrl}/api/v1/licenses';
-  Payload := '{"customerId":"' + EscapeJson(Email) + '","fingerprint":"' + EscapeJson(Fingerprint) + '"}';
-
-  WinHttpReq := CreateOleObject('WinHttp.WinHttpRequest.5.1');
-  WinHttpReq.Open('POST', Url, False);
-  WinHttpReq.Option[9] := 2048; // WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_2
-  WinHttpReq.SetRequestHeader('Content-Type', 'application/json');
-  if '{#LicenseApiToken}' <> '' then
-    WinHttpReq.SetRequestHeader('X-Installer-Token', '{#LicenseApiToken}');
-  WinHttpReq.Send(Payload);
-
-  Status := WinHttpReq.Status;
-  Log(Format('License server responded with %d', [Status]));
-  if (Status <> 200) and (Status <> 201) then
-    RaiseException(Format('License request failed (%d): %s', [Status, FormatErrorResponse(WinHttpReq.ResponseText)]));
-
-  Result := WinHttpReq.ResponseText;
-end;
-
-procedure PersistLicenseKey(const Key: string);
-var
-  StoragePath, StorageDir: string;
-begin
   StoragePath := LicenseStoragePath();
   StorageDir := ExtractFilePath(StoragePath);
   if not DirExists(StorageDir) then
-  begin
     if not ForceDirectories(StorageDir) then
-      RaiseException('Unable to create directory for license key at ' + StorageDir);
-  end;
-  if not SaveStringToFile(StoragePath, Key, False) then
-    RaiseException('Unable to write license key to ' + StoragePath);
-  Log('Stored license key at ' + StoragePath);
+      RaiseException('Unable to create directory for license data at ' + StorageDir);
+
+  Payload := '{' + #13#10 +
+    '  "licenseKey": "' + EscapeJson(Trim(Key)) + '",' + #13#10 +
+    '  "email": "' + EscapeJson(NormaliseEmail(Email)) + '"' + #13#10 +
+    '}' + #13#10;
+
+  if not SaveStringToFile(StoragePath, Payload, False) then
+    RaiseException('Unable to write license details to ' + StoragePath);
+
+  Log('Stored license details at ' + StoragePath);
 end;
 
-procedure ShowLicenseKey(const Key: string);
+procedure ShowLicenseSummary(const Email, Key: string);
 begin
-  MsgBox('Installation complete! Your license key is:\n\n' + Key + '\n\nIt has been saved automatically to ' + LicenseStoragePath() +
-    '. Keep a copy for your records.', mbInformation, MB_OK);
-end;
-
-function ActivateLicense(): string;
-var
-  Fingerprint, Response, Key: string;
-begin
-  Fingerprint := GetMachineFingerprint();
-  Response := RequestLicenseFromServer(Fingerprint);
-  Key := ExtractJsonValue(Response, 'licenseKey');
-  if Key = '' then
-    RaiseException('License server response did not include a license key.');
-  PersistLicenseKey(Key);
-  ShowLicenseKey(Key);
-  Result := Key;
+  MsgBox('Installation complete! Your Paystack subscription email is recorded as ' + NormaliseEmail(Email) + '.' + #13#10#13#10 +
+    'Your license key:' + #13#10#13#10 + Key + #13#10#13#10 +
+    'These details have been saved to ' + LicenseStoragePath() + '.', mbInformation, MB_OK);
 end;
 
 procedure InitializeWizard;
 begin
-  CustomerInfoPage := CreateInputQueryPage(wpUserInfo, 'License Activation', 'Enter your customer details',
-    'Provide the email address or order identifier used at purchase. It will be used to issue your license key.');
-  CustomerInfoPage.Add('Email address:', False);
+  CustomerInfoPage := CreateInputQueryPage(wpUserInfo, 'License Activation', 'Enter your subscription details',
+    'Provide the email address tied to your Paystack subscription and the active license key that was emailed to you.');
+  CustomerInfoPage.Add('Subscription email:', False);
+  CustomerInfoPage.Add('License key:', True);
+end;
+
+function NextButtonClick(CurPageID: Integer): Boolean;
+begin
+  Result := True;
+  if CurPageID = CustomerInfoPage.ID then
+  begin
+    if GetCustomerEmail() = '' then
+    begin
+      MsgBox('Enter the email address linked to your Paystack subscription before continuing.', mbError, MB_OK);
+      Result := False;
+      Exit;
+    end;
+    if GetLicenseKey() = '' then
+    begin
+      MsgBox('Enter the license key from your activation email before continuing.', mbError, MB_OK);
+      Result := False;
+      Exit;
+    end;
+  end;
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
+var
+  Email, Key: string;
 begin
   if CurStep = ssPostInstall then
   begin
+    Email := GetCustomerEmail();
+    Key := GetLicenseKey();
     try
-      GeneratedLicenseKey := ActivateLicense();
+      PersistLicenseDetails(Email, Key);
+      ShowLicenseSummary(Email, Key);
+      GeneratedLicenseKey := Key;
       ActivationFailed := False;
     except
       ActivationFailed := True;
       GeneratedLicenseKey := '';
-      SuppressibleMsgBox('License activation failed:\n\n' + GetExceptionMessage + '\n\nYou can rerun the installer or contact support to complete activation.',
-        mbError, MB_OK, IDOK);
+      SuppressibleMsgBox('Saving your license failed:' + #13#10#13#10 + GetExceptionMessage + #13#10#13#10 +
+        'You can rerun the installer after resolving the issue.', mbError, MB_OK, IDOK);
     end;
   end;
 end;
