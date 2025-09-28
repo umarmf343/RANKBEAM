@@ -1,0 +1,86 @@
+RankBeam Licensing Deployment on cPanel
+======================================
+
+Follow this checklist to deploy the Node.js Paystack licensing service and keep
+subscriptions in sync with desktop activations.
+
+1. Prepare the application
+--------------------------
+1. Upload the `license-api/` directory to your cPanel account (e.g. via FTP or
+   the File Manager). Place it in a folder such as `~/apps/license-api`.
+2. Inside the directory run:
+
+```
+cd ~/apps/license-api
+npm install --production
+mkdir -p data
+```
+
+3. Create a `.env` file (or use the cPanel **Environment Variables** interface)
+   with the values described below.
+
+2. Environment variables
+------------------------
+Set these key/value pairs under **cPanel → Setup Node.js App → Environment
+Variables** or inside `.env`:
+
+```
+PORT=8080
+DATABASE_PATH=/home/<cpanel-user>/apps/license-api/data/licenses.db
+PAYSTACK_SECRET_KEY=sk_live_xxx
+PAYSTACK_PLAN_CODE=PLN_xxxxxx
+PAYSTACK_WEBHOOK_SECRET=whsec_xxx
+LICENSE_API_TOKEN=installer-shared-secret
+```
+
+* `PORT` – the internal port the app listens on. Passenger will proxy external
+  traffic.
+* `DATABASE_PATH` – absolute path where SQLite will live. Ensure the parent
+  directory is writable by the cPanel user.
+* `PAYSTACK_*` – live Paystack credentials.
+* `LICENSE_API_TOKEN` – shared secret used by the installer/desktop app.
+
+3. Create the Node.js application
+---------------------------------
+1. Open **cPanel → Setup Node.js App** and click **Create Application**.
+2. Choose **Application Mode: Production**, **Node.js version 18+**, and set the
+   **Application root** to the uploaded `license-api` folder.
+3. Set **Application startup file** to `server.js`.
+4. Save the application. Passenger installs dependencies (if not already
+   present) and creates a startup script.
+5. Click **Run NPM Install** if you did not run it manually.
+6. Click **Restart** to boot the service. Check the log viewer to confirm you see
+   `RankBeam licensing API listening on port …`.
+
+4. Configure HTTPS and webhooks
+-------------------------------
+1. Point your domain or subdomain (e.g. `licensing.example.com`) to the cPanel
+   account and install an SSL certificate (AutoSSL works).
+2. In **cPanel → Domains → Redirects** (or Apache config) map the public domain
+   to the Node.js app port if required.
+3. In the Paystack dashboard add the webhook URL:
+   `https://licensing.example.com/paystack/webhook`.
+4. Paste the webhook signing secret into `PAYSTACK_WEBHOOK_SECRET`.
+
+5. Cron job for housekeeping (optional)
+--------------------------------------
+Although the API auto-flags expired licences during validation, you can run a
+nightly cron job to call the helper endpoint and ensure stale licences are
+marked:
+
+```
+0 3 * * * curl -fsS https://licensing.example.com/health >/dev/null
+```
+
+This doubles as a heartbeat check. Add additional cron jobs if you build custom
+scripts (e.g. a weekly SQLite backup).
+
+6. Desktop application alignment
+--------------------------------
+* Update the desktop build pipeline to set `LICENSE_API_URL` to your public
+  domain and `LICENSE_API_TOKEN` to the same secret stored in cPanel.
+* Distribute new installers so every activation sends the hardware fingerprint
+  to `/paystack/validate`.
+
+With these steps the legacy Go server is fully retired and the Paystack-backed
+Node.js service runs smoothly on cPanel.
