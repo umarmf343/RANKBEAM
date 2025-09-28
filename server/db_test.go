@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -18,37 +19,30 @@ func TestLicenseStoreLifecycle(t *testing.T) {
 	defer store.Close()
 
 	ctx := context.Background()
-	hash := HashFingerprint("fingerprint")
+	expiresAt := time.Now().Add(licenseValidity)
 
-	lic, created, err := store.CreateLicense(ctx, "CUSTOMER", hash)
+	lic, err := store.CreateLicense(ctx, "user@example.com", "ref-123", expiresAt)
 	if err != nil {
 		t.Fatalf("CreateLicense: %v", err)
 	}
-	if !created {
-		t.Fatalf("expected license to be newly created")
+	if lic.Key == "" {
+		t.Fatalf("expected license key to be set")
 	}
 
-	lic2, created, err := store.CreateLicense(ctx, "CUSTOMER", hash)
+	fetched, err := store.FindByKey(ctx, lic.Key)
 	if err != nil {
-		t.Fatalf("CreateLicense second call: %v", err)
+		t.Fatalf("FindByKey: %v", err)
 	}
-	if created {
-		t.Fatalf("expected existing license to be returned")
-	}
-	if lic2.Key != lic.Key {
-		t.Fatalf("expected same key, got %s vs %s", lic2.Key, lic.Key)
+	if fetched.CustomerEmail != "user@example.com" {
+		t.Fatalf("expected stored email, got %s", fetched.CustomerEmail)
 	}
 
-	validated, err := store.ValidateLicense(ctx, lic.Key, hash)
-	if err != nil {
+	if _, err := store.ValidateLicense(ctx, lic.Key, "user@example.com"); err != nil {
 		t.Fatalf("ValidateLicense: %v", err)
 	}
-	if validated.Key != lic.Key {
-		t.Fatalf("unexpected validated key %s", validated.Key)
-	}
 
-	if _, err := store.ValidateLicense(ctx, lic.Key, HashFingerprint("other")); err != ErrFingerprintMismatch {
-		t.Fatalf("expected ErrFingerprintMismatch, got %v", err)
+	if _, err := store.ValidateLicense(ctx, lic.Key, "wrong@example.com"); !errors.Is(err, ErrEmailMismatch) {
+		t.Fatalf("expected ErrEmailMismatch, got %v", err)
 	}
 }
 
@@ -63,40 +57,14 @@ func TestLicenseExpiration(t *testing.T) {
 	defer store.Close()
 
 	ctx := context.Background()
-	hash := HashFingerprint("fingerprint")
 
-	lic, created, err := store.CreateLicense(ctx, "CUSTOMER", hash)
+	expiresAt := time.Now().Add(-time.Hour)
+	lic, err := store.CreateLicense(ctx, "user@example.com", "ref-123", expiresAt)
 	if err != nil {
 		t.Fatalf("CreateLicense: %v", err)
 	}
-	if !created {
-		t.Fatalf("expected license to be newly created")
-	}
 
-	expiredAt := time.Now().UTC().Add(-31 * 24 * time.Hour)
-	if _, err := store.db.ExecContext(ctx,
-		`UPDATE licenses SET created_at = ? WHERE key = ?`,
-		expiredAt, lic.Key,
-	); err != nil {
-		t.Fatalf("update license timestamp: %v", err)
-	}
-
-	if _, err := store.ValidateLicense(ctx, lic.Key, hash); err != ErrLicenseExpired {
+	if _, err := store.ValidateLicense(ctx, lic.Key, "user@example.com"); !errors.Is(err, ErrLicenseExpired) {
 		t.Fatalf("expected ErrLicenseExpired, got %v", err)
-	}
-
-	refreshed, created, err := store.CreateLicense(ctx, "CUSTOMER", hash)
-	if err != nil {
-		t.Fatalf("CreateLicense after expiry: %v", err)
-	}
-	if !created {
-		t.Fatalf("expected new license to be issued after expiry")
-	}
-	if refreshed.Key == lic.Key {
-		t.Fatalf("expected new license key after expiry")
-	}
-
-	if _, err := store.ValidateLicense(ctx, refreshed.Key, hash); err != nil {
-		t.Fatalf("ValidateLicense after refresh: %v", err)
 	}
 }
