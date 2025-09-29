@@ -15,6 +15,9 @@ func TestValidateLicense(t *testing.T) {
 		if r.URL.Path != "/paystack/validate" {
 			t.Fatalf("unexpected path %s", r.URL.Path)
 		}
+		if token := r.Header.Get("X-License-Token"); token != defaultInstallerToken {
+			t.Fatalf("expected X-License-Token %s, got %s", defaultInstallerToken, token)
+		}
 		var payload map[string]string
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			t.Fatalf("decode payload: %v", err)
@@ -82,6 +85,9 @@ func TestValidateLocalLicense(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/paystack/validate" {
 			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		if token := r.Header.Get("X-License-Token"); token != defaultInstallerToken {
+			t.Fatalf("expected X-License-Token %s, got %s", defaultInstallerToken, token)
 		}
 		var payload map[string]string
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {

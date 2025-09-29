@@ -14,6 +14,8 @@ import (
 	"time"
 )
 
+const defaultInstallerToken = "7c9012993daa2abb40170bab55e1f88d2b24a9601afdec9958a302ce9ba9c43f"
+
 var (
 	ErrMissingBaseURL     = errors.New("license: missing base URL")
 	ErrInvalidLicense     = errors.New("license: invalid or expired license")
@@ -77,7 +79,11 @@ func NewClient(baseURL, token string, httpClient *http.Client) (*Client, error) 
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 15 * time.Second}
 	}
-	return &Client{BaseURL: strings.TrimRight(baseURL, "/"), APIToken: token, HTTPClient: httpClient}, nil
+	trimmedToken := strings.TrimSpace(token)
+	if trimmedToken == "" {
+		trimmedToken = defaultInstallerToken
+	}
+	return &Client{BaseURL: strings.TrimRight(baseURL, "/"), APIToken: trimmedToken, HTTPClient: httpClient}, nil
 }
 
 // NewClientFromEnv reads LICENSE_API_URL and LICENSE_API_TOKEN.

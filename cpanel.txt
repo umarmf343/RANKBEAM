@@ -30,7 +30,7 @@ DATABASE_PATH=/home/<cpanel-user>/apps/license-api/data/licenses.db
 PAYSTACK_SECRET_KEY=sk_live_xxx
 PAYSTACK_PLAN_CODE=PLN_xxxxxx
 PAYSTACK_WEBHOOK_SECRET=whsec_xxx
-LICENSE_API_TOKEN=installer-shared-secret
+LICENSE_API_TOKEN=7c9012993daa2abb40170bab55e1f88d2b24a9601afdec9958a302ce9ba9c43f
 ```
 
 * `PORT` – the internal port the app listens on. Passenger will proxy external

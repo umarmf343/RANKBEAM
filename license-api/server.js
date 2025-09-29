@@ -19,6 +19,9 @@ import { initializeTransaction, verifyWebhookSignature } from './paystack.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+const DEFAULT_INSTALLER_TOKEN =
+  '7c9012993daa2abb40170bab55e1f88d2b24a9601afdec9958a302ce9ba9c43f';
+
 const app = express();
 
 app.use(cors());
@@ -42,11 +45,12 @@ function normaliseEmail(email) {
 }
 
 function ensureToken(req, res) {
-  const expected = process.env.LICENSE_API_TOKEN;
+  const expected = process.env.LICENSE_API_TOKEN || DEFAULT_INSTALLER_TOKEN;
   if (!expected) {
     return true;
   }
-  const provided = req.get('X-License-Token') || req.get('X-Installer-Token');
+  const provided =
+    (req.get('X-License-Token') || req.get('X-Installer-Token') || '').trim();
   if (!provided || provided !== expected) {
     res.status(403).json({ error: 'Forbidden' });
     return false;
