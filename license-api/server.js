@@ -35,8 +35,13 @@ app.use(
 
 const PORT = Number(process.env.PORT || process.env.LICENSE_API_PORT || 8080);
 const databasePath = process.env.DATABASE_PATH || path.join(__dirname, 'data', 'licenses.db');
-initDatabase(databasePath);
-clearExpiredFingerprints();
+try {
+  await initDatabase(databasePath);
+  clearExpiredFingerprints();
+} catch (error) {
+  console.error('Failed to initialise database', error);
+  process.exit(1);
+}
 
 function normaliseEmail(email) {
   return String(email || '')
