@@ -73,7 +73,7 @@ fingerprint:
 ```bash
 curl -X POST http://localhost:8080/paystack/validate \
   -H "Content-Type: application/json" \
-  -H "X-License-Token: installer-shared-secret" \
+  -H "X-License-Token: 7c9012993daa2abb40170bab55e1f88d2b24a9601afdec9958a302ce9ba9c43f" \
   -d '{"email":"buyer@example.com","licenseKey":"DEV-LIC-001","fingerprint":"DEV-FP-001"}'
 ```
 

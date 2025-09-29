@@ -83,7 +83,7 @@ the stored license file:
 
 ```powershell
 $env:LICENSE_API_URL = "https://licensing.yourdomain.com"
-$env:LICENSE_API_TOKEN = "installer-shared-secret"
+$env:LICENSE_API_TOKEN = "7c9012993daa2abb40170bab55e1f88d2b24a9601afdec9958a302ce9ba9c43f"
 go build -o bin/rankbeam.exe ./cmd/app
 ```
 

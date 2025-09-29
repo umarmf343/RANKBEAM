@@ -113,7 +113,7 @@ DATABASE_PATH=/home/<user>/license-api/data/licenses.db
 PAYSTACK_SECRET_KEY=sk_live_xxx
 PAYSTACK_PLAN_CODE=PLN_xxxxxx
 PAYSTACK_WEBHOOK_SECRET=whsec_xxx
-LICENSE_API_TOKEN=installer-shared-secret
+LICENSE_API_TOKEN=7c9012993daa2abb40170bab55e1f88d2b24a9601afdec9958a302ce9ba9c43f
 ```
 
 * `PAYSTACK_SECRET_KEY` – used for the `transaction/initialize` call.
@@ -153,7 +153,7 @@ curl -X POST http://localhost:8080/paystack/webhook \
 ```
 curl -X POST http://localhost:8080/paystack/validate \
   -H "Content-Type: application/json" \
-  -H "X-License-Token: installer-shared-secret" \
+  -H "X-License-Token: 7c9012993daa2abb40170bab55e1f88d2b24a9601afdec9958a302ce9ba9c43f" \
   -d '{"email":"tester@example.com","licenseKey":"XYZ","fingerprint":"TEST-FP-001"}'
 ```
 
@@ -174,7 +174,7 @@ curl -X POST http://localhost:8080/paystack/validate \
 
 ```
 LICENSE_API_URL=https://licensing.yourdomain.com
-LICENSE_API_TOKEN=installer-shared-secret
+LICENSE_API_TOKEN=7c9012993daa2abb40170bab55e1f88d2b24a9601afdec9958a302ce9ba9c43f
 ```
 
 8. Operations and maintenance
