@@ -40,7 +40,14 @@ const DEFAULT_INSTALLER_TOKEN =
 
 const DEFAULT_PAYSTACK_WEBHOOK_IPS = ['52.31.139.75', '52.49.173.169', '52.214.14.220'];
 
-const allowLocalWebhookIps = readBooleanEnv('PAYSTACK_WEBHOOK_ALLOW_LOCAL', process.env.NODE_ENV !== 'production');
+const allowLocalWebhookIps = readBooleanEnv(
+  'PAYSTACK_WEBHOOK_ALLOW_LOCAL',
+  process.env.NODE_ENV !== 'production',
+);
+const allowLocalValidationRequests = readBooleanEnv(
+  'LICENSE_API_ALLOW_LOCAL',
+  process.env.NODE_ENV !== 'production',
+);
 
 const defaultWebhookIps = [...DEFAULT_PAYSTACK_WEBHOOK_IPS];
 if (allowLocalWebhookIps) {
@@ -55,6 +62,7 @@ const configuredWebhookIps = (webhookIpSource || defaultWebhookIps.join(','))
   .filter(Boolean);
 
 const trustedPaystackIps = new Set(configuredWebhookIps);
+const LOCAL_IPS = new Set(['127.0.0.1', '::1']);
 
 function normaliseIpAddress(ip) {
   if (!ip) {
@@ -75,6 +83,24 @@ function isTrustedPaystackRequest(req) {
   if (!trustedPaystackIps.size) {
     return false;
   }
+  for (const ip of collectCandidateIps(req)) {
+    if (trustedPaystackIps.has(ip)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function isLocalRequest(req) {
+  for (const ip of collectCandidateIps(req)) {
+    if (LOCAL_IPS.has(ip)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function collectCandidateIps(req) {
   const candidates = new Set();
   const forwarded = req.headers['x-forwarded-for'];
   if (forwarded) {
@@ -92,12 +118,7 @@ function isTrustedPaystackRequest(req) {
   if (socketIp) {
     candidates.add(socketIp);
   }
-  for (const ip of candidates) {
-    if (trustedPaystackIps.has(ip)) {
-      return true;
-    }
-  }
-  return false;
+  return candidates;
 }
 
 const app = express();
@@ -122,6 +143,9 @@ function normaliseEmail(email) {
 }
 
 function ensureToken(req, res) {
+  if (allowLocalValidationRequests && isLocalRequest(req)) {
+    return true;
+  }
   const expected = process.env.LICENSE_API_TOKEN || DEFAULT_INSTALLER_TOKEN;
   if (!expected) {
     return true;
