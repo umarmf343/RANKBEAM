@@ -16,7 +16,8 @@ operational details see `Paystack licence Guide.txt`.
     in good standing and return the current expiry.
   * `POST /paystack/deactivate` – clear the fingerprint so the user can move to
     another machine.
-  * `GET /health` – lightweight heartbeat endpoint.
+* `GET /health` – lightweight heartbeat endpoint that also reports database status.
+* `HEAD /health` – returns `204` when the service and database are ready (ideal for cron jobs).
 * Licences are persisted in `license-api/data/licenses.db` (SQLite) using the
   `better-sqlite3` driver. Fingerprints are required for every validation.
 

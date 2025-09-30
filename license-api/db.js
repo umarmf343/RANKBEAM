@@ -92,6 +92,10 @@ class BetterSqliteAdapter {
     }
     return statement.get();
   }
+
+  ping() {
+    this.db.prepare('SELECT 1').get();
+  }
 }
 
 async function createSqlJsAdapter(dbPath) {
@@ -154,6 +158,10 @@ class SqlJsAdapter {
     const buffer = Buffer.from(data);
     fs.writeFileSync(this.dbPath, buffer);
   }
+
+  ping() {
+    this.db.exec('SELECT 1');
+  }
 }
 
 function bindParams(statement, params) {
@@ -196,6 +204,20 @@ export function savePendingSubscription({ email, licenseKey, fingerprint, refere
        updated_at=excluded.updated_at;`,
     { email, licenseKey, fingerprint, reference, now }
   );
+}
+
+export function databaseHealth() {
+  try {
+    const db = getDb();
+    if (typeof db.ping === 'function') {
+      db.ping();
+    } else {
+      db.get('SELECT 1 AS ok');
+    }
+    return { status: 'ok' };
+  } catch (error) {
+    return { status: 'error', error: error?.message || 'database unavailable' };
+  }
 }
 
 export function activateLicense({ email, licenseKey, fingerprint, expiresAt, reference }) {
