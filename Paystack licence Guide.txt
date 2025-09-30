@@ -43,7 +43,11 @@ Contents
    required monthly price. Capture the `plan` code (e.g. `PLN_xxxxxx`).
 2. Navigate to **Settings → API Keys & Webhooks** and configure the production
    webhook URL: `https://<your-domain>/paystack/webhook`.
-3. Copy the webhook signing secret and store it in `PAYSTACK_WEBHOOK_SECRET`.
+3. Restrict the webhook endpoint to Paystack's documented IP addresses
+   (`52.31.139.75`, `52.49.173.169`, `52.214.14.220`). Update
+   `PAYSTACK_WEBHOOK_IPS` if your infrastructure adds additional trusted
+   hop(s) (for example a reverse proxy) so the service recognises the request
+   as legitimate.
 4. Enable email collection on the checkout form. The API relies on
    `data.customer.email`.
 5. (Optional) Add `metadata` fields for troubleshooting. The service already
@@ -67,7 +71,7 @@ Contents
   * Requires the shared token header.
   * Clears the fingerprint so the licence can be reused on another device.
 * `POST /paystack/webhook`
-  * Expects a signed Paystack payload.
+  * Only accepts requests from whitelisted Paystack IP addresses.
   * Processes subscription creation, renewals, and successful charges. Updates
     the licence expiry to payment timestamp + 30 days.
 * `GET /health`
@@ -112,13 +116,13 @@ PORT=8080
 DATABASE_PATH=/home/<user>/license-api/data/licenses.db
 PAYSTACK_SECRET_KEY=sk_live_xxx
 PAYSTACK_PLAN_CODE=PLN_xxxxxx
-PAYSTACK_WEBHOOK_SECRET=whsec_xxx
+PAYSTACK_WEBHOOK_IPS=52.31.139.75,52.49.173.169,52.214.14.220
 LICENSE_API_TOKEN=7c9012993daa2abb40170bab55e1f88d2b24a9601afdec9958a302ce9ba9c43f
 ```
 
 * `PAYSTACK_SECRET_KEY` – used for the `transaction/initialize` call.
 * `PAYSTACK_PLAN_CODE` – monthly subscription plan code.
-* `PAYSTACK_WEBHOOK_SECRET` – Paystack signature verification.
+* `PAYSTACK_WEBHOOK_IPS` – comma-separated list of trusted webhook sources.
 * `LICENSE_API_TOKEN` – shared secret between installer, desktop app, and the
   validation API.
 * `DATABASE_PATH` – absolute path to the SQLite database file.
@@ -137,14 +141,13 @@ curl -X POST http://localhost:8080/paystack/subscribe \
 ```
 
    Capture the `authorizationUrl` and visit it with Paystack test cards.
-5. Simulate a webhook (replace the signature with one generated using your test
-   webhook secret):
+5. Simulate a webhook (temporarily add your testing IP, e.g. `127.0.0.1`, to
+   `PAYSTACK_WEBHOOK_IPS` so the request is accepted):
 
 ```
 payload='{"event":"charge.success","data":{"paid_at":"2024-01-01T12:00:00Z","reference":"TEST_REF","customer":{"email":"tester@example.com"},"metadata":{"licenseKey":"XYZ","fingerprint":"TEST-FP-001"}}}'
 curl -X POST http://localhost:8080/paystack/webhook \
   -H "Content-Type: application/json" \
-  -H "x-paystack-signature: $(printf "%s" "$payload" | openssl dgst -sha512 -hmac whsec_test | cut -d' ' -f2)" \
   -d "$payload"
 ```
 
@@ -184,7 +187,7 @@ LICENSE_API_TOKEN=7c9012993daa2abb40170bab55e1f88d2b24a9601afdec9958a302ce9ba9c4
   process with PM2, Passenger, systemd, or your host's process manager.
 * **Backups**: Copy `data/licenses.db` daily. SQLite can be snapshotted by
   stopping the service or using the `.backup` command.
-* **Monitoring**: Capture stdout/stderr logs. Look for `invalid signature` or
+* **Monitoring**: Capture stdout/stderr logs. Look for `untrusted source` or
   `fingerprint mismatch` events, which usually indicate tampering attempts or
   users trying to reuse licences.
 * **Deactivation workflow**: Offer a simple dashboard or support command that
