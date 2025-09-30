@@ -15,6 +15,23 @@ import {
 } from './db.js';
 import { initializeTransaction } from './paystack.js';
 
+const truthyValues = new Set(['1', 'true', 'yes', 'on']);
+const falsyValues = new Set(['0', 'false', 'no', 'off']);
+
+function readBooleanEnv(name, defaultValue = false) {
+  const raw = String(process.env[name] || '').trim().toLowerCase();
+  if (!raw) {
+    return defaultValue;
+  }
+  if (truthyValues.has(raw)) {
+    return true;
+  }
+  if (falsyValues.has(raw)) {
+    return false;
+  }
+  return defaultValue;
+}
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -23,9 +40,18 @@ const DEFAULT_INSTALLER_TOKEN =
 
 const DEFAULT_PAYSTACK_WEBHOOK_IPS = ['52.31.139.75', '52.49.173.169', '52.214.14.220'];
 
-const configuredWebhookIps = (process.env.PAYSTACK_WEBHOOK_IPS || DEFAULT_PAYSTACK_WEBHOOK_IPS.join(','))
+const allowLocalWebhookIps = readBooleanEnv('PAYSTACK_WEBHOOK_ALLOW_LOCAL', process.env.NODE_ENV !== 'production');
+
+const defaultWebhookIps = [...DEFAULT_PAYSTACK_WEBHOOK_IPS];
+if (allowLocalWebhookIps) {
+  defaultWebhookIps.push('127.0.0.1', '::1');
+}
+
+const webhookIpSource = (process.env.PAYSTACK_WEBHOOK_IPS || '').trim();
+
+const configuredWebhookIps = (webhookIpSource || defaultWebhookIps.join(','))
   .split(',')
-  .map((ip) => ip.trim())
+  .map((ip) => normaliseIpAddress(ip))
   .filter(Boolean);
 
 const trustedPaystackIps = new Set(configuredWebhookIps);
@@ -46,6 +72,9 @@ function normaliseIpAddress(ip) {
 }
 
 function isTrustedPaystackRequest(req) {
+  if (!trustedPaystackIps.size) {
+    return false;
+  }
   const candidates = new Set();
   const forwarded = req.headers['x-forwarded-for'];
   if (forwarded) {
