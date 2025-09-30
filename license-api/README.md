@@ -26,7 +26,9 @@ npm run dev
 ### Starting a subscription
 
 You can kick off a mocked Paystack subscription by sending a `POST` request to the
-`/paystack/subscribe` route:
+`/paystack/subscribe` route. Sending a `GET` request to the same endpoint returns a
+helpful reminder about the required payload, so you can quickly confirm that the
+API is reachable before wiring up the installer:
 
 ```powershell
 Invoke-WebRequest -Uri "http://localhost:8080/paystack/subscribe" `
