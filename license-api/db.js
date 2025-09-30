@@ -211,8 +211,8 @@ export function activateLicense({ email, licenseKey, fingerprint, expiresAt, ref
          WHEN excluded.fingerprint IS NULL OR excluded.fingerprint = '' THEN licenses.fingerprint
          ELSE licenses.fingerprint
        END,
-       expires_at=excluded.expiresAt,
-       paystack_reference=COALESCE(excluded.reference, licenses.paystack_reference),
+       expires_at=excluded.expires_at,
+       paystack_reference=COALESCE(excluded.paystack_reference, licenses.paystack_reference),
        status='active',
        updated_at=excluded.updated_at;`,
     { email, licenseKey, fingerprint, expiresAt, reference, now }
