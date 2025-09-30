@@ -21,6 +21,41 @@ Start the API in watch mode:
 npm run dev
 ```
 
+## Testing Paystack flows manually
+
+### Starting a subscription
+
+You can kick off a mocked Paystack subscription by sending a `POST` request to the
+`/paystack/subscribe` route:
+
+```powershell
+Invoke-WebRequest -Uri "http://localhost:8080/paystack/subscribe" `
+  -Method POST `
+  -Headers @{ "Content-Type" = "application/json" } `
+  -Body '{"email":"buyer@example.com","fingerprint":"DEV-FP-001"}'
+```
+
+The response includes an authorization URL and the provisional license key that you
+can use when simulating the webhook flow.
+
+### Simulating the webhook from PowerShell
+
+PowerShell treats the `-H/--header` and `-d/--data` shorthand flags that are common
+in `curl` examples as separate parameters. Instead, declare a payload variable and
+pass the headers via a hashtable:
+
+```powershell
+$payload = '{"event":"charge.success","data":{"paid_at":"2024-11-01T12:00:00Z","reference":"TEST_REF_001","customer":{"email":"buyer@example.com"},"metadata":{"licenseKey":"DEV-LIC-001","fingerprint":"DEV-FP-001"}}}'
+
+Invoke-WebRequest -Uri "http://localhost:8080/paystack/webhook" `
+  -Method POST `
+  -Headers @{ "Content-Type" = "application/json" } `
+  -Body $payload
+```
+
+This avoids PowerShell interpreting the payload assignment as a command and ensures
+that the JSON body is posted correctly.
+
 ## Environment variables
 
 - `PORT` / `LICENSE_API_PORT` – Port to listen on (defaults to `8080`).
