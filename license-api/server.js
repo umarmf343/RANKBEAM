@@ -12,6 +12,7 @@ import {
   getLicenseByKey,
   initDatabase,
   savePendingSubscription,
+  databaseHealth,
 } from './db.js';
 import { initializeTransaction } from './paystack.js';
 
@@ -176,8 +177,35 @@ function calculateExpiry(baseDate) {
   return expires.toISOString();
 }
 
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+const HEALTH_ENDPOINTS = ['/health', '/healthz', '/readyz'];
+
+function healthSnapshot() {
+  const dbStatus = databaseHealth();
+  const healthy = dbStatus.status === 'ok';
+  return {
+    overallStatus: healthy ? 'ok' : 'degraded',
+    httpStatus: healthy ? 200 : 503,
+    payload: {
+      status: healthy ? 'ok' : 'degraded',
+      timestamp: new Date().toISOString(),
+      uptimeSeconds: Math.round(process.uptime()),
+      checks: {
+        database: dbStatus,
+      },
+    },
+  };
+}
+
+HEALTH_ENDPOINTS.forEach((path) => {
+  app.get(path, (req, res) => {
+    const snapshot = healthSnapshot();
+    res.status(snapshot.httpStatus).json(snapshot.payload);
+  });
+
+  app.head(path, (req, res) => {
+    const snapshot = healthSnapshot();
+    res.sendStatus(snapshot.httpStatus === 200 ? 204 : snapshot.httpStatus);
+  });
 });
 
 app.get('/paystack/subscribe', (req, res) => {
