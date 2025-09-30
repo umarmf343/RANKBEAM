@@ -10,7 +10,7 @@ operational details see `Paystack licence Guide.txt`.
 * `license-api/server.js` boots an Express app that exposes:
   * `POST /paystack/subscribe` – generate a licence key, create a Paystack
     checkout session, and store a pending record.
-  * `POST /paystack/webhook` – accept signed Paystack events, activate licences,
+  * `POST /paystack/webhook` – accept Paystack events from whitelisted IPs,
     and set expiry to payment timestamp + 30 days.
   * `POST /paystack/validate` – confirm `email + licenseKey + fingerprint` are
     in good standing and return the current expiry.
@@ -51,14 +51,14 @@ your local webhook if you use a tunnelling tool such as `ngrok`.
 
 4. Simulate a webhook manually (optional)
 ----------------------------------------
-If you prefer not to tunnel, craft a fake webhook payload and sign it with your
-sandbox secret:
+If you prefer not to tunnel, craft a fake webhook payload. Add your testing IP
+address (for example `127.0.0.1`) to `PAYSTACK_WEBHOOK_IPS` so the API accepts
+the local request:
 
 ```bash
 payload='{"event":"charge.success","data":{"paid_at":"2024-11-01T12:00:00Z","reference":"TEST_REF_001","customer":{"email":"buyer@example.com"},"metadata":{"licenseKey":"DEV-LIC-001","fingerprint":"DEV-FP-001"}}}'
 curl -X POST http://localhost:8080/paystack/webhook \
   -H "Content-Type: application/json" \
-  -H "x-paystack-signature: $(printf "%s" "$payload" | openssl dgst -sha512 -hmac $PAYSTACK_WEBHOOK_SECRET | cut -d' ' -f2)" \
   -d "$payload"
 ```
 
@@ -101,7 +101,7 @@ Expected response:
   before flipping the value in production.
 * Provide support staff with a small script or API client that calls
   `POST /paystack/deactivate` so customers can move to new devices.
-* Monitor logs for `invalid signature`, `fingerprint mismatch`, or `subscription
+* Monitor logs for `untrusted source`, `fingerprint mismatch`, or `subscription
   expired` responses—they often indicate billing issues that need follow-up.
 
 Follow these steps to keep the RankBeam activation flow tightly aligned with the

@@ -1,7 +1,6 @@
 import 'dotenv/config';
 import crypto from 'crypto';
 import express from 'express';
-import bodyParser from 'body-parser';
 import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -14,7 +13,7 @@ import {
   initDatabase,
   savePendingSubscription,
 } from './db.js';
-import { initializeTransaction, verifyWebhookSignature } from './paystack.js';
+import { initializeTransaction } from './paystack.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -22,16 +21,60 @@ const __dirname = path.dirname(__filename);
 const DEFAULT_INSTALLER_TOKEN =
   '7c9012993daa2abb40170bab55e1f88d2b24a9601afdec9958a302ce9ba9c43f';
 
+const DEFAULT_PAYSTACK_WEBHOOK_IPS = ['52.31.139.75', '52.49.173.169', '52.214.14.220'];
+
+const configuredWebhookIps = (process.env.PAYSTACK_WEBHOOK_IPS || DEFAULT_PAYSTACK_WEBHOOK_IPS.join(','))
+  .split(',')
+  .map((ip) => ip.trim())
+  .filter(Boolean);
+
+const trustedPaystackIps = new Set(configuredWebhookIps);
+
+function normaliseIpAddress(ip) {
+  if (!ip) {
+    return '';
+  }
+  const trimmed = String(ip).trim();
+  if (!trimmed) {
+    return '';
+  }
+  const withoutPrefix = trimmed.replace(/^::ffff:/, '');
+  if (withoutPrefix === '::1') {
+    return '127.0.0.1';
+  }
+  return withoutPrefix;
+}
+
+function isTrustedPaystackRequest(req) {
+  const candidates = new Set();
+  const forwarded = req.headers['x-forwarded-for'];
+  if (forwarded) {
+    forwarded
+      .split(',')
+      .map((part) => normaliseIpAddress(part))
+      .filter(Boolean)
+      .forEach((ip) => candidates.add(ip));
+  }
+  const directIp = normaliseIpAddress(req.ip);
+  const socketIp = normaliseIpAddress(req.socket?.remoteAddress);
+  if (directIp) {
+    candidates.add(directIp);
+  }
+  if (socketIp) {
+    candidates.add(socketIp);
+  }
+  for (const ip of candidates) {
+    if (trustedPaystackIps.has(ip)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 const app = express();
 
 app.use(cors());
-app.use(
-  bodyParser.json({
-    verify: (req, res, buf) => {
-      req.rawBody = buf;
-    },
-  })
-);
+app.use(express.json());
 
 const PORT = Number(process.env.PORT || process.env.LICENSE_API_PORT || 8080);
 const databasePath = process.env.DATABASE_PATH || path.join(__dirname, 'data', 'licenses.db');
@@ -192,19 +235,13 @@ app.post('/paystack/deactivate', (req, res) => {
 });
 
 app.post('/paystack/webhook', (req, res) => {
-  const signature = req.get('x-paystack-signature');
-  const rawPayload = req.rawBody?.toString('utf8') || '';
-
-  let verified = false;
-  try {
-    verified = verifyWebhookSignature(rawPayload, signature);
-  } catch (error) {
-    console.error('webhook verification error', error.message);
-    return res.status(500).json({ error: 'webhook verification error' });
-  }
-
-  if (!verified) {
-    return res.status(400).json({ error: 'invalid signature' });
+  if (!isTrustedPaystackRequest(req)) {
+    console.warn('webhook request from untrusted IP', {
+      ip: req.ip,
+      socketIp: req.socket?.remoteAddress,
+      forwardedFor: req.headers['x-forwarded-for'],
+    });
+    return res.status(403).json({ error: 'untrusted source' });
   }
 
   const payload = req.body || {};

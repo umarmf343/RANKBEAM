@@ -68,7 +68,7 @@ Deploy the Node.js service located in `license-api/` (see `cpanel.txt` and
 * Install dependencies (`npm install --production`) and create the SQLite data
   directory.
 * Configure environment variables: `PORT`, `DATABASE_PATH`,
-  `PAYSTACK_SECRET_KEY`, `PAYSTACK_PLAN_CODE`, `PAYSTACK_WEBHOOK_SECRET`, and
+  `PAYSTACK_SECRET_KEY`, `PAYSTACK_PLAN_CODE`, `PAYSTACK_WEBHOOK_IPS`, and
   `LICENSE_API_TOKEN`.
 * Register the webhook URL `https://your-domain/paystack/webhook` in Paystack
   so renewals update the licence ledger.

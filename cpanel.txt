@@ -29,7 +29,7 @@ PORT=8080
 DATABASE_PATH=/home/<cpanel-user>/apps/license-api/data/licenses.db
 PAYSTACK_SECRET_KEY=sk_live_xxx
 PAYSTACK_PLAN_CODE=PLN_xxxxxx
-PAYSTACK_WEBHOOK_SECRET=whsec_xxx
+PAYSTACK_WEBHOOK_IPS=52.31.139.75,52.49.173.169,52.214.14.220
 LICENSE_API_TOKEN=7c9012993daa2abb40170bab55e1f88d2b24a9601afdec9958a302ce9ba9c43f
 ```
 
@@ -37,7 +37,7 @@ LICENSE_API_TOKEN=7c9012993daa2abb40170bab55e1f88d2b24a9601afdec9958a302ce9ba9c4
   traffic.
 * `DATABASE_PATH` – absolute path where SQLite will live. Ensure the parent
   directory is writable by the cPanel user.
-* `PAYSTACK_*` – live Paystack credentials.
+* `PAYSTACK_*` – live Paystack credentials and trusted webhook IPs.
 * `LICENSE_API_TOKEN` – shared secret used by the installer/desktop app.
 
 3. Create the Node.js application
@@ -60,7 +60,8 @@ LICENSE_API_TOKEN=7c9012993daa2abb40170bab55e1f88d2b24a9601afdec9958a302ce9ba9c4
    to the Node.js app port if required.
 3. In the Paystack dashboard add the webhook URL:
    `https://licensing.example.com/paystack/webhook`.
-4. Paste the webhook signing secret into `PAYSTACK_WEBHOOK_SECRET`.
+4. Lock down the webhook endpoint so only Paystack's IPs reach it. Update
+   `PAYSTACK_WEBHOOK_IPS` if your reverse proxy adds an intermediate address.
 
 5. Cron job for housekeeping (optional)
 --------------------------------------

@@ -29,6 +29,7 @@ npm run dev
 - `PAYSTACK_SECRET_KEY` – Paystack secret key for API requests.
 - `PAYSTACK_PLAN_CODE` – Paystack plan code used when starting subscriptions.
 - `PAYSTACK_PUBLIC_KEY` – Optional Paystack public key (forwarded in webhook payloads).
+- `PAYSTACK_WEBHOOK_IPS` – Comma-separated list of IPs allowed to call the webhook (defaults to Paystack's IPs).
 - `DEBUG_SQLITE_FALLBACK` – Set to a truthy value to log the underlying error when `better-sqlite3` is unavailable.
 
 ## Database backends
