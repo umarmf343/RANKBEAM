@@ -22,7 +22,28 @@ go mod download
 ```bash
 go run ./cmd/app
 ```
+## 4. Refresh the Windows resources (only when artwork changes)
 
+The repository includes a pre-generated `cmd/app/app_windows_amd64.syso` file that embeds
+the application icon and manifest. If you replace `assets/app.png` or `assets/app.ico`,
+regenerate the resource object before building:
+
+```bash
+go run github.com/tc-hib/go-winres@latest simply \
+  --icon assets/app.ico \
+  --manifest gui \
+  --product-name RankBeam \
+  --file-description "RankBeam Amazon research desktop app" \
+  --product-version 1.0.0 \
+  --file-version 1.0.0 \
+  --out cmd/app/app \
+  --arch amd64
+```
+
+This command regenerates the `.syso` file that `go build` automatically embeds on Windows.
+You can run it from any platform with Go installed.
+
+## 5. Build the Windows executables
 ## 4. Build the Windows executables
 
 ```bash
