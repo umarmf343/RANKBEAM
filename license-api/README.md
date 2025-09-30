@@ -62,7 +62,8 @@ that the JSON body is posted correctly.
 
 - `PORT` / `LICENSE_API_PORT` – Port to listen on (defaults to `8080`).
 - `DATABASE_PATH` – Full path to the SQLite database file. Defaults to `data/licenses.db` next to this README.
-- `LICENSE_API_TOKEN` – Shared secret used to protect the `/paystack/validate` and `/paystack/deactivate` routes.
+- `LICENSE_API_TOKEN` – Shared secret used to protect the `/paystack/validate` and `/paystack/deactivate` routes. Requests must include this value in the `X-License-Token` or `X-Installer-Token` header when local bypass is disabled.
+- `LICENSE_API_ALLOW_LOCAL` – When truthy, requests originating from `127.0.0.1`/`::1` are allowed to access the validation and deactivation routes without the shared token (defaults to truthy outside production).
 - `PAYSTACK_SECRET_KEY` – Paystack secret key for API requests.
 - `PAYSTACK_PLAN_CODE` – Paystack plan code used when starting subscriptions.
 - `PAYSTACK_PUBLIC_KEY` – Optional Paystack public key (forwarded in webhook payloads).
