@@ -35,6 +35,7 @@ function readBooleanEnv(name, defaultValue = false) {
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const PUBLIC_DIR = path.join(__dirname, 'public');
 
 const DEFAULT_INSTALLER_TOKEN =
   '7c9012993daa2abb40170bab55e1f88d2b24a9601afdec9958a302ce9ba9c43f';
@@ -126,6 +127,14 @@ const app = express();
 
 app.use(cors());
 app.use(express.json());
+if (PUBLIC_DIR) {
+  app.use(
+    express.static(PUBLIC_DIR, {
+      extensions: ['html'],
+      maxAge: process.env.NODE_ENV === 'production' ? '1h' : 0,
+    }),
+  );
+}
 
 const PORT = Number(process.env.PORT || process.env.LICENSE_API_PORT || 8080);
 const databasePath = process.env.DATABASE_PATH || path.join(__dirname, 'data', 'licenses.db');
@@ -135,6 +144,12 @@ try {
 } catch (error) {
   console.error('Failed to initialise database', error);
   process.exit(1);
+}
+
+if (PUBLIC_DIR) {
+  app.get('/', (req, res) => {
+    res.sendFile(path.join(PUBLIC_DIR, 'index.html'));
+  });
 }
 
 function normaliseEmail(email) {
