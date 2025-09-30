@@ -228,7 +228,7 @@ export function getLicenseByKey(licenseKey) {
   if (row.expires_at) {
     const expiresAt = new Date(row.expires_at);
     if (Number.isFinite(expiresAt.valueOf()) && expiresAt < new Date()) {
-      db.run('UPDATE licenses SET status = "expired", updated_at = ? WHERE id = ?', [new Date().toISOString(), row.id]);
+      db.run("UPDATE licenses SET status = 'expired', updated_at = ? WHERE id = ?", [new Date().toISOString(), row.id]);
       row.status = 'expired';
     }
   }
