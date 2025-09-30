@@ -127,6 +127,16 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+app.get('/paystack/subscribe', (req, res) => {
+  res
+    .status(405)
+    .json({
+      error: 'POST required',
+      message:
+        'Send a POST request with JSON body {"email": "user@example.com", "fingerprint": "DEVICE-ID"} to start a subscription.',
+    });
+});
+
 app.post('/paystack/subscribe', async (req, res) => {
   const email = normaliseEmail(req.body?.email);
   const fingerprint = String(req.body?.fingerprint || '').trim();
