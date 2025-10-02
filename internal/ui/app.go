@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image/color"
 	"io"
 	"net/url"
 	"sort"
@@ -426,7 +427,8 @@ func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, count
 				}
 			}
 		})
-	presetList.SetMinSize(fyne.NewSize(220, 240))
+	presetListScroll := container.NewVScroll(presetList)
+	presetListScroll.SetMinSize(fyne.NewSize(220, 240))
 
 	refreshPresetList := func(targetName string) {
 		names := listKeywordPresetNames()
@@ -591,13 +593,13 @@ func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, count
 	})
 	bestsellerControls.Objects = []fyne.CanvasObject{bestsellerCopy, bestsellerJSON, bestsellerCSV}
 
-	keywordInfoAction := newInfoButton("Generates keyword ideas with volume, competition and relevancy scores from Amazon auto-complete data.")
-	categoryInfoAction := newInfoButton("Highlights categories where the seed term is trending so you can position listings effectively.")
-	bestsellerInfoAction := newInfoButton("Summarises top selling books for the keyword to benchmark pricing, reviews and rank metrics.")
+	keywordInfoAction := newInfoButton(window, "Generates keyword ideas with volume, competition and relevancy scores from Amazon auto-complete data.")
+	categoryInfoAction := newInfoButton(window, "Highlights categories where the seed term is trending so you can position listings effectively.")
+	bestsellerInfoAction := newInfoButton(window, "Summarises top selling books for the keyword to benchmark pricing, reviews and rank metrics.")
 
-	keywordInfoHeader := newInfoButton("Generates keyword ideas with volume, competition and relevancy scores from Amazon auto-complete data.")
-	categoryInfoHeader := newInfoButton("Highlights categories where the seed term is trending so you can position listings effectively.")
-	bestsellerInfoHeader := newInfoButton("Summarises top selling books for the keyword to benchmark pricing, reviews and rank metrics.")
+	keywordInfoHeader := newInfoButton(window, "Generates keyword ideas with volume, competition and relevancy scores from Amazon auto-complete data.")
+	categoryInfoHeader := newInfoButton(window, "Highlights categories where the seed term is trending so you can position listings effectively.")
+	bestsellerInfoHeader := newInfoButton(window, "Summarises top selling books for the keyword to benchmark pricing, reviews and rank metrics.")
 
 	fetchKeywords := func() {
 		seed := strings.TrimSpace(keywordEntry.Text)
@@ -825,7 +827,7 @@ func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, count
 		presetNameEntry,
 		container.NewGridWithColumns(1, savePresetButton),
 		widget.NewSeparator(),
-		container.NewBorder(nil, container.NewHBox(deletePresetButton, layout.NewSpacer()), nil, nil, presetList),
+		container.NewBorder(nil, container.NewHBox(deletePresetButton, layout.NewSpacer()), nil, nil, presetListScroll),
 	)
 
 	form := widget.NewForm(
@@ -1557,11 +1559,30 @@ func updateKeywordChart(chart *fyne.Container, insights []scraper.KeywordInsight
 	chart.Refresh()
 }
 
-func newInfoButton(tooltip string) *widget.Button {
-	button := widget.NewButtonWithIcon("", theme.InfoIcon(), func() {})
+func newInfoButton(window fyne.Window, tooltip string) *widget.Button {
+	button := widget.NewButtonWithIcon("", theme.InfoIcon(), func() {
+		if win := resolveWindow(window); win != nil {
+			dialog.NewInformation("Details", tooltip, win).Show()
+		}
+	})
 	button.Importance = widget.LowImportance
-	button.SetTooltip(tooltip)
 	return button
+}
+
+func resolveWindow(window fyne.Window) fyne.Window {
+	if window != nil {
+		return window
+	}
+	if app := fyne.CurrentApp(); app != nil {
+		if drv := app.Driver(); drv != nil {
+			for _, win := range drv.AllWindows() {
+				if win != nil {
+					return win
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func showThrottleSettingsDialog(window fyne.Window) {
@@ -2077,12 +2098,21 @@ func newComplianceBadge(keyword string) fyne.CanvasObject {
 	chipContent := container.NewHBox(layout.NewSpacer(), label, layout.NewSpacer())
 	padded := container.NewPadded(chipContent)
 
-	background := canvas.NewRectangle(theme.Color(theme.ColorNameError, theme.VariantLight))
+	background := canvas.NewRectangle(themeColor(theme.ColorNameError, theme.VariantLight))
 	background.CornerRadius = 8
-	background.StrokeColor = theme.Color(theme.ColorNameError, theme.VariantDark)
+	background.StrokeColor = themeColor(theme.ColorNameError, theme.VariantDark)
 	background.StrokeWidth = 1
 
 	return container.NewMax(background, padded)
+}
+
+func themeColor(name fyne.ThemeColorName, variant fyne.ThemeVariant) color.Color {
+	if app := fyne.CurrentApp(); app != nil {
+		if th := app.Settings().Theme(); th != nil {
+			return th.Color(name, variant)
+		}
+	}
+	return theme.DefaultTheme().Color(name, variant)
 }
 
 type internationalSortColumn int
