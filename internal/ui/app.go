@@ -26,9 +26,16 @@ import (
 )
 
 const (
-	requestTimeout = 30 * time.Second
-	tutorialURL    = "https://www.youtube.com/results?search_query=RankBeam+tutorial"
+	requestTimeout      = 30 * time.Second
+	tutorialURL         = "https://www.youtube.com/results?search_query=RankBeam+tutorial"
+	defaultScrollHeight = 280
 )
+
+func newResultScroll(content fyne.CanvasObject) *container.Scroll {
+	scroll := container.NewVScroll(content)
+	scroll.SetMinSize(fyne.NewSize(0, defaultScrollHeight))
+	return scroll
+}
 
 var activeService *scraper.Service
 
@@ -174,7 +181,7 @@ func buildProductLookupTab(window fyne.Window, service *scraper.Service, countri
 	content := container.NewVBox(
 		form,
 		widget.NewSeparator(),
-		container.NewVScroll(container.NewPadded(resultLabel)),
+		newResultScroll(container.NewPadded(resultLabel)),
 	)
 
 	return content
@@ -324,7 +331,7 @@ func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, count
 		widget.NewButton("Bestseller Snapshot", fetchBestsellers),
 	)
 
-	keywordOutputs := container.NewVScroll(container.NewVBox(
+	keywordOutputs := newResultScroll(container.NewVBox(
 		widget.NewLabelWithStyle("Keyword Suggestions", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		keywordLabel,
 		widget.NewSeparator(),
@@ -460,7 +467,7 @@ func buildCompetitiveTab(window fyne.Window, service *scraper.Service, countries
 		container.NewGridWithColumns(3, minVolumeEntry, maxCompetitionEntry, maxDensityEntry),
 		reverseButton,
 		widget.NewSeparator(),
-		container.NewVScroll(reverseLabel),
+		newResultScroll(container.NewPadded(reverseLabel)),
 	)
 
 	campaignSection := container.NewVBox(
@@ -470,7 +477,7 @@ func buildCompetitiveTab(window fyne.Window, service *scraper.Service, countries
 		competitorEntry,
 		campaignButton,
 		widget.NewSeparator(),
-		container.NewVScroll(campaignLabel),
+		newResultScroll(container.NewPadded(campaignLabel)),
 	)
 
 	sidebar := widget.NewForm(
@@ -533,7 +540,7 @@ func buildInternationalTab(window fyne.Window, service *scraper.Service, countri
 		countryGroup,
 		widget.NewButton("Generate Suggestions", fetch),
 		widget.NewSeparator(),
-		container.NewVScroll(resultLabel),
+		newResultScroll(container.NewPadded(resultLabel)),
 	)
 }
 
