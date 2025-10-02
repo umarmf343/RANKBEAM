@@ -29,8 +29,9 @@ Very useful tool that is able to extract almost same amount of data as the offic
 This fork adds a cross-platform desktop experience named **RankBeam**. The application is written in Go using the Fyne toolkit and bundles multiple research workflows:
 
 - Beautiful multi-tab user interface for product lookups, keyword research, competitive analysis, and international market discovery.
-- Backend service with request throttling, timeout management, and heuristic scoring to keep Amazon scraping reliable.
+- Backend service with request throttling, timeout management, and heuristic scoring to keep Amazon scraping reliable. Power users can now tune request limits directly from the in-app **Settings** dialog without editing Go code.
 - Publisher Rocket-inspired extras such as reverse ASIN lookups, AMS keyword generation, bestseller snapshots, and compliance flagging.
+- Responsive Tailwind CSS prototype for browser-based teams that mirrors the desktop workflows (see [docs/web-companion](docs/web-companion/README.md)).
 
 ### Quick start
 
@@ -47,6 +48,10 @@ GOOS=windows GOARCH=amd64 go build -o rankbeam.exe ./cmd/app
 More detailed packaging instructions (including the Inno Setup installer) are available in [`docs/BUILD_WINDOWS.md`](docs/BUILD_WINDOWS.md).
 
 Packaging tips for Windows builds are collected in [`docs/BUILD_WINDOWS.md`](docs/BUILD_WINDOWS.md).
+
+### Browser companion prototype
+
+Prefer to work in the browser? A Tailwind CSS proof-of-concept that mirrors the desktop flows is available under [`docs/web-companion`](docs/web-companion/README.md). The prototype demonstrates tabbed research views, adjustable throttling controls, and sortable localisation tables that align with the native app experience.
 
 **Product List**
 ![alt text](https://i.imgur.com/ES5M4Rx.png)

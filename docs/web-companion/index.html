@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>RankBeam Web Companion</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+  </head>
+  <body class="min-h-screen bg-slate-950 text-slate-100 font-sans">
+    <div class="mx-auto flex min-h-screen max-w-6xl flex-col px-6 py-8">
+      <header class="mb-8 rounded-3xl border border-slate-800 bg-slate-900/80 p-6 shadow-xl shadow-slate-950/60 backdrop-blur">
+        <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <p class="text-sm uppercase tracking-[0.45em] text-slate-400">RankBeam</p>
+            <h1 class="mt-1 text-3xl font-semibold text-slate-50">Web Companion Prototype</h1>
+            <p class="mt-2 max-w-xl text-sm text-slate-300">
+              Mirror the desktop research workflows inside a responsive Tailwind UI. Tabs below map directly to the Product Lookup,
+              Keyword Research, and International expansion tooling in the Go/Fyne app.
+            </p>
+          </div>
+          <div class="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <div class="flex items-center gap-2 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-300">
+              <span class="inline-block h-2 w-2 rounded-full bg-emerald-400"></span>
+              <span>Status: Ready</span>
+            </div>
+            <div class="rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-300">Quota: 18/25 requests left</div>
+            <div class="flex gap-2">
+              <button id="settings-trigger" class="inline-flex items-center gap-2 rounded-full bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-900 shadow-lg shadow-slate-900/30 transition hover:bg-white">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12a7.5 7.5 0 1112.62 5.303l1.884 1.884a.75.75 0 11-1.06 1.06l-1.884-1.884A7.5 7.5 0 014.5 12zm7.5-3a.75.75 0 100 1.5.75.75 0 000-1.5z" />
+                </svg>
+                Settings
+              </button>
+              <a href="https://www.youtube.com/results?search_query=RankBeam+tutorial" class="inline-flex items-center gap-2 rounded-full border border-slate-700 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:border-slate-500 hover:text-white" target="_blank" rel="noreferrer">
+                Tutorial
+              </a>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <main class="flex-1 rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-2xl shadow-slate-950/60 backdrop-blur">
+        <nav class="mb-6 flex flex-wrap gap-2">
+          <button data-tab="product" class="tab-button rounded-full px-5 py-2 text-sm font-semibold text-slate-300 transition hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400">Product Lookup</button>
+          <button data-tab="keyword" class="tab-button rounded-full px-5 py-2 text-sm font-semibold text-slate-300 transition hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400">Keyword Research</button>
+          <button data-tab="international" class="tab-button rounded-full px-5 py-2 text-sm font-semibold text-slate-300 transition hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400">International</button>
+        </nav>
+
+        <section data-panel="product" class="panel grid gap-6 lg:grid-cols-[1fr_0.9fr]">
+          <div class="space-y-4">
+            <div class="rounded-2xl border border-slate-800 bg-slate-950/70 p-5 shadow-inner shadow-slate-900/70">
+              <h2 class="text-lg font-semibold text-slate-100">Fetch listing snapshot</h2>
+              <p class="mt-1 text-sm text-slate-400">Enter an ASIN and marketplace to replicate the desktop product lookup workflow.</p>
+              <form class="mt-4 grid gap-3 sm:grid-cols-2">
+                <label class="flex flex-col gap-1 text-sm">
+                  <span class="text-slate-400">ASIN</span>
+                  <input type="text" placeholder="B08N5WRWNW" class="rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-slate-100 placeholder:text-slate-500 focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+                </label>
+                <label class="flex flex-col gap-1 text-sm">
+                  <span class="text-slate-400">Marketplace</span>
+                  <select class="rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-slate-100 focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                    <option>United States (US)</option>
+                    <option>Canada (CA)</option>
+                    <option>United Kingdom (UK)</option>
+                    <option>Australia (AU)</option>
+                  </select>
+                </label>
+                <label class="flex flex-col gap-1 text-sm">
+                  <span class="text-slate-400">Include bestseller ranks</span>
+                  <input type="checkbox" class="h-5 w-5 rounded border-slate-600 bg-slate-800 text-emerald-400 focus:ring-emerald-500" checked />
+                </label>
+                <div class="flex items-end justify-end">
+                  <button type="button" class="inline-flex items-center gap-2 rounded-xl bg-emerald-400 px-4 py-2 text-sm font-semibold text-emerald-950 shadow shadow-emerald-900/50 transition hover:bg-emerald-300">
+                    Fetch product
+                  </button>
+                </div>
+              </form>
+            </div>
+
+            <div class="rounded-2xl border border-slate-800 bg-slate-950/80 p-5 shadow-lg shadow-slate-950/50">
+              <p class="text-xs uppercase tracking-widest text-emerald-300">Snapshot preview</p>
+              <h3 class="mt-1 text-xl font-semibold text-white">Mindfulness Journal (Paperback)</h3>
+              <div class="mt-4 grid gap-4 sm:grid-cols-2">
+                <div class="space-y-2">
+                  <p class="text-sm text-slate-400">Price</p>
+                  <p class="text-lg font-semibold text-slate-100">USD 14.99</p>
+                  <p class="text-sm text-slate-500">Prime eligible • Ships in 2 days</p>
+                </div>
+                <div class="space-y-2">
+                  <p class="text-sm text-slate-400">Reviews</p>
+                  <p class="text-lg font-semibold text-slate-100">4.7 ⭐ (1,842)</p>
+                  <p class="text-sm text-slate-500">#2 in Stress Management &gt; Journals</p>
+                </div>
+              </div>
+              <div class="mt-4 grid gap-3 md:grid-cols-2">
+                <div class="rounded-xl border border-slate-800 bg-slate-900/70 p-4">
+                  <p class="text-xs uppercase tracking-wide text-slate-400">Compliance flags</p>
+                  <p class="mt-1 text-sm text-slate-200">All good – no KDP violations detected.</p>
+                </div>
+                <div class="rounded-xl border border-slate-800 bg-slate-900/70 p-4">
+                  <p class="text-xs uppercase tracking-wide text-slate-400">Export</p>
+                  <div class="mt-2 flex gap-2 text-sm">
+                    <button class="rounded-lg border border-slate-700 px-3 py-1 text-slate-200 hover:border-slate-500">Copy summary</button>
+                    <button class="rounded-lg border border-slate-700 px-3 py-1 text-slate-200 hover:border-slate-500">Export CSV</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <aside class="space-y-4">
+            <div class="rounded-2xl border border-slate-800 bg-gradient-to-br from-slate-900 to-slate-950 p-5 shadow-lg shadow-slate-950/50">
+              <h3 class="text-lg font-semibold text-white">Reverse ASIN Spotlight</h3>
+              <p class="mt-2 text-sm text-slate-400">Quickly see which competing books are outranking your listing and export their keyword targets for AMS campaigns.</p>
+              <button class="mt-4 w-full rounded-xl bg-slate-800 py-2 text-sm font-semibold text-slate-200 transition hover:bg-slate-700">Open reverse lookup</button>
+            </div>
+            <div class="rounded-2xl border border-slate-800 bg-slate-950/70 p-5 shadow-inner shadow-slate-900/60">
+              <h4 class="text-sm font-semibold text-slate-200">Research presets</h4>
+              <p class="mt-2 text-xs text-slate-400">Manage the same preset library as the desktop sidebar.</p>
+              <ul class="mt-3 space-y-2 text-sm text-slate-300">
+                <li class="flex items-center justify-between rounded-lg border border-slate-800 bg-slate-900/70 px-3 py-2">
+                  Low-content launch
+                  <span class="text-xs text-slate-500">US • 500 volume</span>
+                </li>
+                <li class="flex items-center justify-between rounded-lg border border-slate-800 bg-slate-900/70 px-3 py-2">
+                  Evergreen indie bundle
+                  <span class="text-xs text-slate-500">CA/UK • 700 volume</span>
+                </li>
+              </ul>
+            </div>
+          </aside>
+        </section>
+
+        <section data-panel="keyword" class="panel hidden space-y-6">
+          <div class="grid gap-4 lg:grid-cols-[0.75fr_1fr]">
+            <div class="rounded-2xl border border-slate-800 bg-slate-950/70 p-6 shadow-inner shadow-slate-900/60">
+              <h2 class="text-lg font-semibold text-slate-100">Keyword generator</h2>
+              <p class="mt-2 text-sm text-slate-400">These controls reflect the Go/Fyne filters for minimum volume, competition, and title density.</p>
+              <div class="mt-4 grid gap-3 sm:grid-cols-3">
+                <label class="flex flex-col gap-1 text-sm">
+                  <span class="text-slate-400">Seed keyword</span>
+                  <input type="text" placeholder="gratitude journal" class="rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-slate-100 focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+                </label>
+                <label class="flex flex-col gap-1 text-sm">
+                  <span class="text-slate-400">Min volume</span>
+                  <input type="number" placeholder="300" class="rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-slate-100 focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+                </label>
+                <label class="flex flex-col gap-1 text-sm">
+                  <span class="text-slate-400">Max competition</span>
+                  <input type="number" placeholder="0.6" class="rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-slate-100 focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-500" step="0.1" />
+                </label>
+              </div>
+              <button class="mt-4 inline-flex items-center gap-2 rounded-xl bg-emerald-400 px-4 py-2 text-sm font-semibold text-emerald-950 shadow shadow-emerald-900/50 transition hover:bg-emerald-300">Generate suggestions</button>
+            </div>
+            <div class="rounded-2xl border border-slate-800 bg-slate-950/80 p-6 shadow-lg shadow-slate-950/50">
+              <p class="text-xs uppercase tracking-[0.3em] text-emerald-300">Bestseller snapshot</p>
+              <h3 class="mt-2 text-xl font-semibold text-white">Top 3 competitors</h3>
+              <ol class="mt-4 space-y-3 text-sm text-slate-200">
+                <li class="rounded-xl border border-slate-800 bg-slate-900/70 p-3">1. 5-Minute Gratitude Journal — 2,400 est. sales/mo</li>
+                <li class="rounded-xl border border-slate-800 bg-slate-900/70 p-3">2. Calm Mindfulness Prompts — 1,980 est. sales/mo</li>
+                <li class="rounded-xl border border-slate-800 bg-slate-900/70 p-3">3. Daily Reflection Workbook — 1,540 est. sales/mo</li>
+              </ol>
+              <div class="mt-4 flex flex-wrap gap-2 text-xs text-slate-400">
+                <span class="rounded-full border border-slate-700 px-3 py-1">Export CSV</span>
+                <span class="rounded-full border border-slate-700 px-3 py-1">Copy keywords</span>
+                <span class="rounded-full border border-slate-700 px-3 py-1">Open AMS builder</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="rounded-2xl border border-slate-800 bg-slate-950/70 p-6 shadow-inner shadow-slate-900/60">
+            <h3 class="text-lg font-semibold text-slate-100">Category intelligence</h3>
+            <p class="mt-2 text-sm text-slate-400">Display trending KDP niches exactly like the desktop analytics cards.</p>
+            <div class="mt-4 grid gap-4 md:grid-cols-3">
+              <div class="rounded-xl border border-slate-800 bg-slate-900/70 p-4">
+                <p class="text-xs uppercase tracking-wide text-slate-400">Highest momentum</p>
+                <p class="mt-1 text-lg font-semibold text-white">Self-care &amp; Wellness</p>
+                <p class="mt-2 text-sm text-emerald-300">▲ 18% month over month</p>
+              </div>
+              <div class="rounded-xl border border-slate-800 bg-slate-900/70 p-4">
+                <p class="text-xs uppercase tracking-wide text-slate-400">Indie opportunity</p>
+                <p class="mt-1 text-lg font-semibold text-white">Guided Mindfulness Workbooks</p>
+                <p class="mt-2 text-sm text-slate-400">Average rank 6,200 with 40% indie share</p>
+              </div>
+              <div class="rounded-xl border border-slate-800 bg-slate-900/70 p-4">
+                <p class="text-xs uppercase tracking-wide text-slate-400">Compliance watch</p>
+                <p class="mt-1 text-lg font-semibold text-white">Stay clear of trademarked phrases like "Calm®"</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section data-panel="international" class="panel hidden space-y-6">
+          <div class="rounded-2xl border border-slate-800 bg-slate-950/80 p-6 shadow-lg shadow-slate-950/50">
+            <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <h2 class="text-lg font-semibold text-slate-100">International keyword expansion</h2>
+                <p class="mt-1 text-sm text-slate-400">This Tailwind table mirrors the sortable localisation metrics introduced in the desktop app.</p>
+              </div>
+              <div class="flex flex-wrap items-center gap-3 text-sm text-slate-300">
+                <div class="flex items-center gap-2 rounded-full border border-slate-700 px-3 py-1">
+                  <span class="h-2 w-2 rounded-full bg-emerald-400"></span>
+                  <span id="intl-summary">0 localised keywords • 0 markets</span>
+                </div>
+                <button class="rounded-xl border border-slate-700 px-3 py-1 hover:border-slate-500">Copy table</button>
+                <button class="rounded-xl border border-slate-700 px-3 py-1 hover:border-slate-500">Export CSV</button>
+              </div>
+            </div>
+
+            <div class="mt-6 overflow-hidden rounded-2xl border border-slate-800">
+              <table class="w-full table-auto text-left text-sm">
+                <thead class="bg-slate-900 text-xs uppercase tracking-wide text-slate-400">
+                  <tr>
+                    <th data-sort="country" class="cursor-pointer px-4 py-3 hover:bg-slate-900/80">Country</th>
+                    <th data-sort="keyword" class="cursor-pointer px-4 py-3 hover:bg-slate-900/80">Keyword</th>
+                    <th data-sort="volume" class="cursor-pointer px-4 py-3 text-right hover:bg-slate-900/80">Volume</th>
+                  </tr>
+                </thead>
+                <tbody id="intl-table-body" class="divide-y divide-slate-800 bg-slate-950/60 text-slate-100"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="rounded-2xl border border-slate-800 bg-slate-950/70 p-6 shadow-inner shadow-slate-900/60">
+            <h3 class="text-lg font-semibold text-slate-100">Regional presets</h3>
+            <p class="mt-2 text-sm text-slate-400">Pre-select the same marketplace bundles exposed in the desktop sidebar.</p>
+            <div class="mt-4 grid gap-3 sm:grid-cols-3">
+              <label class="flex items-center gap-2 rounded-xl border border-slate-800 bg-slate-900/70 px-4 py-3 text-sm">
+                <input type="checkbox" class="h-4 w-4 rounded border-slate-600 bg-slate-800 text-emerald-400 focus:ring-emerald-500" checked />
+                North America (US, CA, MX)
+              </label>
+              <label class="flex items-center gap-2 rounded-xl border border-slate-800 bg-slate-900/70 px-4 py-3 text-sm">
+                <input type="checkbox" class="h-4 w-4 rounded border-slate-600 bg-slate-800 text-emerald-400 focus:ring-emerald-500" checked />
+                Europe (DE, FR, IT, ES, UK)
+              </label>
+              <label class="flex items-center gap-2 rounded-xl border border-slate-800 bg-slate-900/70 px-4 py-3 text-sm">
+                <input type="checkbox" class="h-4 w-4 rounded border-slate-600 bg-slate-800 text-emerald-400 focus:ring-emerald-500" />
+                Asia Pacific (JP, AU, SG)
+              </label>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div id="settings-dialog" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-950/70 backdrop-blur">
+      <div class="w-full max-w-md rounded-3xl border border-slate-800 bg-slate-900 p-6 shadow-2xl shadow-slate-950/70">
+        <div class="flex items-start justify-between">
+          <div>
+            <p class="text-xs uppercase tracking-[0.35em] text-emerald-300">Throttle control</p>
+            <h2 class="mt-1 text-xl font-semibold text-white">Request settings</h2>
+            <p class="mt-2 text-sm text-slate-400">Match the Go app&apos;s Settings dialog—adjust timeout and concurrency without editing code.</p>
+          </div>
+          <button id="settings-close" class="rounded-full p-1 text-slate-400 transition hover:bg-slate-800 hover:text-white">
+            <span class="sr-only">Close</span>
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <div class="mt-6 space-y-5">
+          <div>
+            <div class="flex items-center justify-between text-sm text-slate-300">
+              <span>Request timeout (seconds)</span>
+              <span id="timeout-value" class="font-semibold text-emerald-300">30s</span>
+            </div>
+            <input id="timeout-slider" type="range" min="10" max="90" value="30" class="mt-3 w-full accent-emerald-400" />
+          </div>
+          <div>
+            <div class="flex items-center justify-between text-sm text-slate-300">
+              <span>Requests per minute</span>
+              <span id="rpm-value" class="font-semibold text-emerald-300">25</span>
+            </div>
+            <input id="rpm-slider" type="range" min="10" max="60" value="25" class="mt-3 w-full accent-emerald-400" />
+          </div>
+        </div>
+
+        <div class="mt-6 flex items-center justify-between text-sm text-slate-400">
+          <p>Settings sync to the backend throttling configuration used by the desktop client.</p>
+          <button id="settings-save" class="rounded-xl bg-emerald-400 px-4 py-2 text-sm font-semibold text-emerald-950 transition hover:bg-emerald-300">Apply</button>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const tabButtons = document.querySelectorAll('[data-tab]');
+      const panels = document.querySelectorAll('[data-panel]');
+
+      function activateTab(id) {
+        tabButtons.forEach((button) => {
+          const isActive = button.dataset.tab === id;
+          button.classList.toggle('bg-slate-800', isActive);
+          button.classList.toggle('text-white', isActive);
+        });
+        panels.forEach((panel) => {
+          panel.classList.toggle('hidden', panel.dataset.panel !== id);
+        });
+      }
+
+      tabButtons.forEach((button, index) => {
+        button.addEventListener('click', () => activateTab(button.dataset.tab));
+        if (index === 0) {
+          activateTab(button.dataset.tab);
+        }
+      });
+
+      const settingsDialog = document.getElementById('settings-dialog');
+      document.getElementById('settings-trigger').addEventListener('click', () => {
+        settingsDialog.classList.remove('hidden');
+        settingsDialog.classList.add('flex');
+      });
+      document.getElementById('settings-close').addEventListener('click', () => {
+        settingsDialog.classList.add('hidden');
+        settingsDialog.classList.remove('flex');
+      });
+
+      const timeoutSlider = document.getElementById('timeout-slider');
+      const timeoutValue = document.getElementById('timeout-value');
+      timeoutSlider.addEventListener('input', () => {
+        timeoutValue.textContent = `${timeoutSlider.value}s`;
+      });
+
+      const rpmSlider = document.getElementById('rpm-slider');
+      const rpmValue = document.getElementById('rpm-value');
+      rpmSlider.addEventListener('input', () => {
+        rpmValue.textContent = rpmSlider.value;
+      });
+
+      document.getElementById('settings-save').addEventListener('click', () => {
+        console.info('Applied settings', {
+          timeoutSeconds: Number(timeoutSlider.value),
+          requestsPerMinute: Number(rpmSlider.value),
+        });
+        settingsDialog.classList.add('hidden');
+        settingsDialog.classList.remove('flex');
+      });
+
+      const internationalTableBody = document.getElementById('intl-table-body');
+      const internationalSummary = document.getElementById('intl-summary');
+      const internationalRows = [
+        { country: 'United States (US)', keyword: 'mindfulness journal', volume: 4200 },
+        { country: 'United Kingdom (UK)', keyword: 'mindfulness diary', volume: 2100 },
+        { country: 'Germany (DE)', keyword: 'achtsamkeit tagebuch', volume: 1650 },
+        { country: 'Canada (CA)', keyword: 'gratitude prompts', volume: 980 },
+        { country: 'France (FR)', keyword: 'journal de pleine conscience', volume: 870 },
+        { country: 'Australia (AU)', keyword: 'mindfulness workbook', volume: 760 },
+      ];
+      const sortState = { column: 'country', direction: 'asc' };
+
+      function renderInternationalTable() {
+        const sorted = [...internationalRows].sort((a, b) => {
+          const { column, direction } = sortState;
+          if (column === 'volume') {
+            return direction === 'asc' ? a.volume - b.volume : b.volume - a.volume;
+          }
+          const lhs = a[column].toLowerCase();
+          const rhs = b[column].toLowerCase();
+          if (lhs === rhs) {
+            return direction === 'asc' ? a.volume - b.volume : b.volume - a.volume;
+          }
+          return direction === 'asc' ? lhs.localeCompare(rhs) : rhs.localeCompare(lhs);
+        });
+
+        internationalTableBody.innerHTML = sorted
+          .map(
+            (row) => `
+              <tr class="hover:bg-slate-900/70">
+                <td class="px-4 py-3">${row.country}</td>
+                <td class="px-4 py-3">${row.keyword}</td>
+                <td class="px-4 py-3 text-right font-semibold text-emerald-300">${row.volume.toLocaleString()}</td>
+              </tr>
+            `,
+          )
+          .join('');
+
+        const uniqueMarkets = new Set(sorted.map((row) => row.country.split('(')[1]?.replace(')', '') || row.country));
+        internationalSummary.textContent = `${sorted.length} localised keywords • ${uniqueMarkets.size} markets`;
+
+        document.querySelectorAll('th[data-sort]').forEach((header) => {
+          header.classList.remove('text-emerald-300');
+          if (header.dataset.sort === sortState.column) {
+            header.classList.add('text-emerald-300');
+            header.innerHTML = `${header.textContent.split(' ')[0]} ${sortState.direction === 'asc' ? '↑' : '↓'}`;
+          } else {
+            header.innerHTML = header.textContent.split(' ')[0];
+          }
+        });
+      }
+
+      document.querySelectorAll('th[data-sort]').forEach((header) => {
+        header.addEventListener('click', () => {
+          const column = header.dataset.sort;
+          if (sortState.column === column) {
+            sortState.direction = sortState.direction === 'asc' ? 'desc' : 'asc';
+          } else {
+            sortState.column = column;
+            sortState.direction = column === 'volume' ? 'desc' : 'asc';
+          }
+          renderInternationalTable();
+        });
+      });
+
+      renderInternationalTable();
+    </script>
+  </body>
+</html>
