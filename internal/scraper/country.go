@@ -32,10 +32,30 @@ var countryConfigs = map[string]CountryConfig{
 	"SG": {Country: "Singapore", Currency: "SGD", Host: "www.amazon.sg", MarketplaceID: "A19VAU5U5O7RUS", MarketID: "211896"},
 }
 
+var (
+	// countryDisplayAlias maps canonical marketplace codes to their preferred
+	// human-friendly variants for display inside the UI. The canonical code is
+	// still used for scraping requests but we surface the alias to match what
+	// merchants expect (for example "UK" instead of the ISO "GB").
+	countryDisplayAlias = map[string]string{
+		"GB": "UK",
+	}
+
+	// countryLookupAlias maps common aliases back to the canonical marketplace
+	// code used by the scraper configuration.
+	countryLookupAlias = map[string]string{
+		"UK": "GB",
+	}
+)
+
 // Countries returns the list of supported country codes.
 func Countries() []string {
 	codes := make([]string, 0, len(countryConfigs))
 	for code := range countryConfigs {
+		if alias, ok := countryDisplayAlias[code]; ok {
+			codes = append(codes, alias)
+			continue
+		}
 		codes = append(codes, code)
 	}
 	return codes
@@ -45,6 +65,9 @@ func Countries() []string {
 // When the country is unknown the function falls back to the United States marketplace.
 func ConfigFor(country string) CountryConfig {
 	normalized := strings.ToUpper(strings.TrimSpace(country))
+	if canonical, ok := countryLookupAlias[normalized]; ok {
+		normalized = canonical
+	}
 	if cfg, ok := countryConfigs[normalized]; ok {
 		return cfg
 	}
