@@ -30,7 +30,6 @@ import (
 )
 
 const (
-	requestTimeout      = 30 * time.Second
 	tutorialURL         = "https://www.youtube.com/results?search_query=RankBeam+tutorial"
 	defaultScrollHeight = 280
 )
@@ -41,7 +40,66 @@ func newResultScroll(content fyne.CanvasObject) *container.Scroll {
 	return scroll
 }
 
-var activeService *scraper.Service
+func currentRequestTimeout() time.Duration {
+	return throttleState.Timeout()
+}
+
+var (
+	activeService *scraper.Service
+	activeQuota   *quotaTracker
+	throttleState = newThrottleConfig(30*time.Second, 25)
+)
+
+type throttleSettings struct {
+	Timeout           time.Duration
+	RequestsPerMinute int
+}
+
+type throttleConfig struct {
+	mu       sync.RWMutex
+	settings throttleSettings
+}
+
+func newThrottleConfig(timeout time.Duration, rpm int) *throttleConfig {
+	cfg := &throttleConfig{}
+	cfg.Update(timeout, rpm)
+	return cfg
+}
+
+func (c *throttleConfig) Snapshot() throttleSettings {
+	if c == nil {
+		return throttleSettings{}
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.settings
+}
+
+func (c *throttleConfig) Timeout() time.Duration {
+	return c.Snapshot().Timeout
+}
+
+func (c *throttleConfig) RequestsPerMinute() int {
+	return c.Snapshot().RequestsPerMinute
+}
+
+func (c *throttleConfig) Update(timeout time.Duration, rpm int) (throttleSettings, bool) {
+	if c == nil {
+		return throttleSettings{}, false
+	}
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+	if rpm <= 0 {
+		rpm = 20
+	}
+	c.mu.Lock()
+	changed := c.settings.Timeout != timeout || c.settings.RequestsPerMinute != rpm
+	c.settings = throttleSettings{Timeout: timeout, RequestsPerMinute: rpm}
+	snapshot := c.settings
+	c.mu.Unlock()
+	return snapshot, changed
+}
 
 type keywordPreset struct {
 	Name           string
@@ -95,8 +153,14 @@ func loadMainApplication(window fyne.Window) {
 	if activeService != nil {
 		activeService.Close()
 	}
+	if activeQuota != nil {
+		activeQuota.Stop()
+		activeQuota = nil
+	}
 
-	service := scraper.NewService(25*time.Second, 25)
+	throttle := throttleState.Snapshot()
+
+	service := scraper.NewService(throttle.Timeout, throttle.RequestsPerMinute)
 	activeService = service
 
 	countries := scraper.Countries()
@@ -105,8 +169,9 @@ func loadMainApplication(window fyne.Window) {
 	statusBinding := binding.NewString()
 	statusBinding.Set("🟢 Service ready")
 	quotaBinding := binding.NewString()
-	quotaTracker := newQuotaTracker(25, quotaBinding)
+	quotaTracker := newQuotaTracker(throttle.RequestsPerMinute, quotaBinding)
 	activityTracker := newServiceActivity(statusBinding)
+	activeQuota = quotaTracker
 
 	productBinding := binding.NewString()
 	productBinding.Set("Enter an ASIN and press Fetch Product to begin.")
@@ -148,11 +213,17 @@ func loadMainApplication(window fyne.Window) {
 
 	statusLabel := widget.NewLabelWithData(statusBinding)
 	quotaLabel := widget.NewLabelWithData(quotaBinding)
+	settingsButton := widget.NewButtonWithIcon("Settings", theme.SettingsIcon(), func() {
+		showThrottleSettingsDialog(window)
+	})
+	settingsButton.Importance = widget.MediumImportance
+
 	topBar := container.NewPadded(container.NewHBox(
 		statusLabel,
 		widget.NewLabel("•"),
 		quotaLabel,
 		layout.NewSpacer(),
+		settingsButton,
 		tutorialButton,
 	))
 
@@ -242,7 +313,7 @@ func buildProductLookupTab(window fyne.Window, service *scraper.Service, countri
 		activity.Start()
 		quota.Use()
 
-		ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), currentRequestTimeout())
 		progress := newCancelableProgress(window, "Fetching Product", fmt.Sprintf("Looking up %s on %s…", strings.ToUpper(asin), strings.ToUpper(country)), cancel)
 		if progress != nil {
 			progress.Show()
@@ -549,7 +620,7 @@ func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, count
 		activity.Start()
 		quota.Use()
 
-		ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), currentRequestTimeout())
 		progress := newCancelableProgress(window, "Keyword Research", fmt.Sprintf("Collecting ideas for \"%s\"…", seed), cancel)
 		if progress != nil {
 			progress.Show()
@@ -604,7 +675,7 @@ func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, count
 		activity.Start()
 		quota.Use()
 
-		ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), currentRequestTimeout())
 		progress := newCancelableProgress(window, "Category Insights", "Discovering high performing categories…", cancel)
 		if progress != nil {
 			progress.Show()
@@ -662,7 +733,7 @@ func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, count
 		activity.Start()
 		quota.Use()
 
-		ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), currentRequestTimeout())
 		progress := newCancelableProgress(window, "Bestseller Snapshot", fmt.Sprintf("Reviewing top results for \"%s\"…", seed), cancel)
 		if progress != nil {
 			progress.Show()
@@ -972,7 +1043,7 @@ func buildCompetitiveTab(window fyne.Window, service *scraper.Service, countries
 		activity.Start()
 		quota.Use()
 
-		ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), currentRequestTimeout())
 		progress := newCancelableProgress(window, "Reverse ASIN", fmt.Sprintf("Investigating %s…", strings.ToUpper(asin)), cancel)
 		if progress != nil {
 			progress.Show()
@@ -1025,7 +1096,7 @@ func buildCompetitiveTab(window fyne.Window, service *scraper.Service, countries
 		activity.Start()
 		quota.Use()
 
-		ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), currentRequestTimeout())
 		progress := newCancelableProgress(window, "Campaign Builder", "Composing Amazon Ads keyword list…", cancel)
 		if progress != nil {
 			progress.Show()
@@ -1118,7 +1189,15 @@ func buildInternationalTab(window fyne.Window, service *scraper.Service, countri
 	resultLabel := widget.NewLabelWithData(result)
 	resultLabel.Wrapping = fyne.TextWrapWord
 
-	var lastInternational []scraper.InternationalKeyword
+	summaryLabel := widget.NewLabel("")
+	summaryLabel.Hide()
+
+	var (
+		lastInternational []scraper.InternationalKeyword
+		tableData         []scraper.InternationalKeyword
+		sortColumn        = internationalSortByCountry
+		sortAscending     = true
+	)
 
 	resultControls := container.NewHBox()
 	resultControls.Hide()
@@ -1142,6 +1221,116 @@ func buildInternationalTab(window fyne.Window, service *scraper.Service, countri
 	})
 	resultControls.Objects = []fyne.CanvasObject{copyButton, jsonButton, csvButton}
 
+	statusContainer := container.NewPadded(resultLabel)
+
+	table := widget.NewTable(
+		func() (int, int) {
+			rows := len(tableData)
+			if rows == 0 {
+				return 1, 3
+			}
+			return rows + 1, 3
+		},
+		func() fyne.CanvasObject {
+			label := widget.NewLabel("")
+			label.Alignment = fyne.TextAlignLeading
+			label.Wrapping = fyne.TextWrapOff
+			return label
+		},
+		func(id widget.TableCellID, object fyne.CanvasObject) {
+			label, _ := object.(*widget.Label)
+			if label == nil {
+				return
+			}
+			label.Wrapping = fyne.TextWrapOff
+			label.TextStyle = fyne.TextStyle{}
+			label.Alignment = fyne.TextAlignLeading
+
+			if id.Row == 0 {
+				headers := []string{"Country", "Keyword", "Volume"}
+				header := headers[id.Col]
+				if sortColumn == internationalSortColumn(id.Col) {
+					if sortAscending {
+						header = fmt.Sprintf("%s ↑", header)
+					} else {
+						header = fmt.Sprintf("%s ↓", header)
+					}
+				}
+				label.TextStyle = fyne.TextStyle{Bold: true}
+				if id.Col == 2 {
+					label.Alignment = fyne.TextAlignTrailing
+				}
+				label.SetText(header)
+				return
+			}
+
+			if id.Row-1 >= len(tableData) {
+				label.SetText("")
+				return
+			}
+
+			keyword := tableData[id.Row-1]
+			switch id.Col {
+			case 0:
+				label.SetText(internationalCountryLabel(keyword))
+			case 1:
+				label.SetText(keyword.Keyword)
+			case 2:
+				label.Alignment = fyne.TextAlignTrailing
+				label.SetText(fmt.Sprintf("%d", keyword.SearchVolume))
+			}
+		},
+	)
+	table.SetColumnWidth(0, 190)
+	table.SetColumnWidth(1, 260)
+	table.SetColumnWidth(2, 110)
+
+	tableContainer := container.NewPadded(table)
+	tableContainer.Hide()
+
+	updateResults := func(keywords []scraper.InternationalKeyword) {
+		tableData = append(tableData[:0], keywords...)
+		sortInternationalKeywords(tableData, sortColumn, sortAscending)
+		lastInternational = append(lastInternational[:0], tableData...)
+
+		if len(tableData) == 0 {
+			table.Refresh()
+			summaryLabel.Hide()
+			tableContainer.Hide()
+			statusContainer.Show()
+			return
+		}
+
+		table.Refresh()
+		markets := countInternationalMarkets(tableData)
+		summaryLabel.SetText(fmt.Sprintf("%d localised keywords across %d markets", len(tableData), markets))
+		summaryLabel.Show()
+		tableContainer.Show()
+		statusContainer.Hide()
+	}
+
+	table.OnSelected = func(id widget.TableCellID) {
+		if id.Row == 0 {
+			newColumn := internationalSortColumn(id.Col)
+			if sortColumn == newColumn {
+				sortAscending = !sortAscending
+			} else {
+				sortColumn = newColumn
+				if newColumn == internationalSortByVolume {
+					sortAscending = false
+				} else {
+					sortAscending = true
+				}
+			}
+			if len(tableData) > 0 {
+				sortInternationalKeywords(tableData, sortColumn, sortAscending)
+				table.Refresh()
+				lastInternational = append(lastInternational[:0], tableData...)
+			}
+		}
+		table.Unselect(id)
+	}
+
 	fetch := func() {
 		keyword := strings.TrimSpace(keywordEntry.Text)
 		if keyword == "" {
@@ -1155,10 +1344,18 @@ func buildInternationalTab(window fyne.Window, service *scraper.Service, countri
 			return
 		}
 
+		resultControls.Hide()
+		summaryLabel.Hide()
+		tableContainer.Hide()
+		statusContainer.Show()
+		safeSet(result, "Localising your keyword list…")
+		tableData = tableData[:0]
+		table.Refresh()
+
 		activity.Start()
 		quota.Use()
 
-		ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), currentRequestTimeout())
 		progress := newCancelableProgress(window, "International Research", "Localising your keyword list…", cancel)
 		if progress != nil {
 			progress.Show()
@@ -1185,12 +1382,17 @@ func buildInternationalTab(window fyne.Window, service *scraper.Service, countri
 					safeSet(result, message)
 					lastInternational = nil
 					resultControls.Hide()
+					updateResults(nil)
 					return
 				}
-				lastInternational = keywords
-				resultControls.Show()
-				resultControls.Refresh()
-				safeSet(result, formatInternationalKeywords(keywords))
+				updateResults(keywords)
+				if len(lastInternational) > 0 {
+					resultControls.Show()
+					resultControls.Refresh()
+					safeSet(result, "Tap table headers to sort by country, keyword or volume.")
+				} else {
+					safeSet(result, "No international opportunities found yet. Try selecting more marketplaces.")
+				}
 			})
 		}()
 	}
@@ -1202,7 +1404,8 @@ func buildInternationalTab(window fyne.Window, service *scraper.Service, countri
 		widget.NewButton("Generate Suggestions", fetch),
 		widget.NewSeparator(),
 		resultControls,
-		newResultScroll(container.NewPadded(resultLabel)),
+		summaryLabel,
+		newResultScroll(container.NewStack(statusContainer, tableContainer)),
 	)
 }
 
@@ -1359,6 +1562,68 @@ func newInfoButton(tooltip string) *widget.Button {
 	button.Importance = widget.LowImportance
 	button.SetTooltip(tooltip)
 	return button
+}
+
+func showThrottleSettingsDialog(window fyne.Window) {
+	if window == nil {
+		return
+	}
+
+	current := throttleState.Snapshot()
+
+	info := widget.NewLabel("Adjust how aggressively RankBeam sends requests. Higher values speed up research but increase the risk of rate limits.")
+	info.Wrapping = fyne.TextWrapWord
+
+	timeoutEntry := widget.NewEntry()
+	timeoutEntry.SetText(strconv.Itoa(int(current.Timeout / time.Second)))
+	timeoutEntry.Validator = func(text string) error {
+		text = strings.TrimSpace(text)
+		if text == "" {
+			return errors.New("request timeout is required")
+		}
+		value, err := strconv.Atoi(text)
+		if err != nil || value <= 0 {
+			return errors.New("enter a positive timeout in seconds")
+		}
+		return nil
+	}
+
+	concurrencyEntry := widget.NewEntry()
+	concurrencyEntry.SetText(strconv.Itoa(current.RequestsPerMinute))
+	concurrencyEntry.Validator = func(text string) error {
+		text = strings.TrimSpace(text)
+		if text == "" {
+			return errors.New("requests per minute is required")
+		}
+		value, err := strconv.Atoi(text)
+		if err != nil || value <= 0 {
+			return errors.New("enter a positive number of requests per minute")
+		}
+		return nil
+	}
+
+	formItems := []*widget.FormItem{
+		widget.NewFormItem("", info),
+		widget.NewFormItem("Request timeout (seconds)", timeoutEntry),
+		widget.NewFormItem("Requests per minute", concurrencyEntry),
+	}
+
+	dialog := dialog.NewForm("Request Settings", "Save", "Cancel", formItems, func(ok bool) {
+		if !ok {
+			return
+		}
+
+		timeoutSeconds, _ := strconv.Atoi(strings.TrimSpace(timeoutEntry.Text))
+		requestsPerMinute, _ := strconv.Atoi(strings.TrimSpace(concurrencyEntry.Text))
+		_, changed := throttleState.Update(time.Duration(timeoutSeconds)*time.Second, requestsPerMinute)
+		if !changed {
+			return
+		}
+
+		loadMainApplication(window)
+	}, window)
+	dialog.Resize(fyne.NewSize(420, 0))
+	dialog.Show()
 }
 
 func copyToClipboard(window fyne.Window, content string) {
@@ -1820,34 +2085,132 @@ func newComplianceBadge(keyword string) fyne.CanvasObject {
 	return container.NewMax(background, padded)
 }
 
+type internationalSortColumn int
+
+const (
+	internationalSortByCountry internationalSortColumn = iota
+	internationalSortByKeyword
+	internationalSortByVolume
+)
+
+func internationalCountryLabel(keyword scraper.InternationalKeyword) string {
+	name := strings.TrimSpace(keyword.CountryName)
+	code := strings.ToUpper(strings.TrimSpace(keyword.CountryCode))
+	if name == "" {
+		name = code
+	}
+	if code == "" {
+		return name
+	}
+	return fmt.Sprintf("%s (%s)", name, code)
+}
+
+func countInternationalMarkets(keywords []scraper.InternationalKeyword) int {
+	seen := make(map[string]struct{})
+	for _, keyword := range keywords {
+		code := strings.ToUpper(strings.TrimSpace(keyword.CountryCode))
+		if code == "" {
+			code = strings.TrimSpace(keyword.CountryName)
+		}
+		if code == "" {
+			continue
+		}
+		seen[code] = struct{}{}
+	}
+	return len(seen)
+}
+
+func sortInternationalKeywords(keywords []scraper.InternationalKeyword, column internationalSortColumn, ascending bool) {
+	sort.SliceStable(keywords, func(i, j int) bool {
+		left := keywords[i]
+		right := keywords[j]
+
+		compareCountry := func() int {
+			return strings.Compare(strings.ToLower(internationalCountryLabel(left)), strings.ToLower(internationalCountryLabel(right)))
+		}
+
+		compareKeyword := func() int {
+			return strings.Compare(strings.ToLower(left.Keyword), strings.ToLower(right.Keyword))
+		}
+
+		compareVolume := func() int {
+			switch {
+			case left.SearchVolume < right.SearchVolume:
+				return -1
+			case left.SearchVolume > right.SearchVolume:
+				return 1
+			default:
+				return 0
+			}
+		}
+
+		result := 0
+		switch column {
+		case internationalSortByCountry:
+			result = compareCountry()
+		case internationalSortByKeyword:
+			result = compareKeyword()
+		case internationalSortByVolume:
+			result = compareVolume()
+		}
+
+		if result == 0 {
+			// Secondary sort keeps output stable and groups related entries.
+			if column != internationalSortByCountry {
+				if country := compareCountry(); country != 0 {
+					result = country
+				}
+			}
+			if result == 0 {
+				result = -compareVolume()
+			}
+			if result == 0 {
+				result = compareKeyword()
+			}
+		}
+
+		if ascending {
+			return result < 0
+		}
+		return result > 0
+	})
+}
+
 func formatInternationalKeywords(keywords []scraper.InternationalKeyword) string {
 	if len(keywords) == 0 {
 		return "No international opportunities found yet. Try selecting more marketplaces."
 	}
 
 	sorted := append([]scraper.InternationalKeyword(nil), keywords...)
-	sort.SliceStable(sorted, func(i, j int) bool {
-		if sorted[i].CountryCode == sorted[j].CountryCode {
-			return sorted[i].SearchVolume > sorted[j].SearchVolume
+	sortInternationalKeywords(sorted, internationalSortByCountry, true)
+
+	headerCountry := "Country"
+	headerKeyword := "Keyword"
+	headerVolume := "Volume"
+	countryWidth := len(headerCountry)
+	keywordWidth := len(headerKeyword)
+	volumeWidth := len(headerVolume)
+
+	rows := make([][3]string, len(sorted))
+	for index, keyword := range sorted {
+		country := internationalCountryLabel(keyword)
+		rows[index] = [3]string{country, keyword.Keyword, fmt.Sprintf("%d", keyword.SearchVolume)}
+		if len(country) > countryWidth {
+			countryWidth = len(country)
 		}
-		return sorted[i].CountryCode < sorted[j].CountryCode
-	})
+		if len(keyword.Keyword) > keywordWidth {
+			keywordWidth = len(keyword.Keyword)
+		}
+		if len(rows[index][2]) > volumeWidth {
+			volumeWidth = len(rows[index][2])
+		}
+	}
 
 	builder := &strings.Builder{}
-	current := ""
-	for _, keyword := range sorted {
-		if keyword.CountryCode != current {
-			if current != "" {
-				builder.WriteString("\n")
-			}
-			name := keyword.CountryName
-			if name == "" {
-				name = keyword.CountryCode
-			}
-			fmt.Fprintf(builder, "%s (%s)\n", name, strings.ToUpper(keyword.CountryCode))
-			current = keyword.CountryCode
-		}
-		fmt.Fprintf(builder, "  • %s — volume %d\n", keyword.Keyword, keyword.SearchVolume)
+	fmt.Fprintf(builder, "%-*s  %-*s  %*s\n", countryWidth, headerCountry, keywordWidth, headerKeyword, volumeWidth, headerVolume)
+	fmt.Fprintf(builder, "%s  %s  %s\n", strings.Repeat("-", countryWidth), strings.Repeat("-", keywordWidth), strings.Repeat("-", volumeWidth))
+	for _, row := range rows {
+		fmt.Fprintf(builder, "%-*s  %-*s  %*s\n", countryWidth, row[0], keywordWidth, row[1], volumeWidth, row[2])
 	}
 
 	return strings.TrimSpace(builder.String())
