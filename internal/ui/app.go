@@ -748,14 +748,14 @@ func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, count
 	)
 	keywordOutputs.SetTabLocation(container.TabLocationTop)
 
-        presetSidebar := container.NewVBox(
-                widget.NewLabelWithStyle("Research Presets", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-                presetInfo,
-                presetNameEntry,
-                container.NewGridWithColumns(1, savePresetButton),
-                widget.NewSeparator(),
-                container.NewBorder(nil, container.NewHBox(deletePresetButton, layout.NewSpacer()), nil, nil, presetList),
-        )
+	presetSidebar := container.NewVBox(
+		widget.NewLabelWithStyle("Research Presets", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		presetInfo,
+		presetNameEntry,
+		container.NewGridWithColumns(1, savePresetButton),
+		widget.NewSeparator(),
+		container.NewBorder(nil, container.NewHBox(deletePresetButton, layout.NewSpacer()), nil, nil, presetList),
+	)
 
 	form := widget.NewForm(
 		widget.NewFormItem("Seed Keyword", keywordEntry),
@@ -800,6 +800,73 @@ func buildCompetitiveTab(window fyne.Window, service *scraper.Service, countries
 	titleEntry.SetPlaceHolder("Book title or product headline")
 	descriptionEntry := widget.NewMultiLineEntry()
 	descriptionEntry.SetPlaceHolder("Paste your blurb or key selling points here…")
+
+	headlineTemplateOptions := []struct {
+		Name    string
+		Content string
+	}{
+		{Name: "Bestseller Boost", Content: "Boost Your Book Sales With Proven Keyword Targeting"},
+		{Name: "Reader Hook", Content: "Hook New Readers With High-Intent Amazon Searches"},
+		{Name: "Launch Momentum", Content: "Launch Day Momentum For Your Latest Release"},
+	}
+	descriptionTemplateOptions := []struct {
+		Name    string
+		Content string
+	}{
+		{Name: "Data-Backed Pitch", Content: "Target engaged shoppers with keyword clusters proven to convert."},
+		{Name: "Benefit Driven", Content: "Show readers the transformation your book delivers in the first line."},
+		{Name: "Social Proof", Content: "Highlight reviews and credibility boosters to earn instant trust."},
+	}
+
+	headlineChoices := []string{"Custom"}
+	headlineLookup := map[string]string{}
+	for _, option := range headlineTemplateOptions {
+		headlineChoices = append(headlineChoices, option.Name)
+		headlineLookup[option.Name] = option.Content
+	}
+	headlinePreview := widget.NewLabel("Toggle a template to prefill your headline.")
+	headlinePreview.Wrapping = fyne.TextWrapWord
+	headlineToggle := widget.NewRadioGroup(headlineChoices, func(selected string) {
+		if selected == "" || selected == "Custom" {
+			headlinePreview.SetText("Toggle a template to prefill your headline.")
+			return
+		}
+		content := headlineLookup[selected]
+		titleEntry.SetText(content)
+		headlinePreview.SetText(content)
+	})
+	headlineToggle.Horizontal = true
+	headlineToggle.SetSelected("Custom")
+
+	descriptionChoices := []string{"Custom"}
+	descriptionLookup := map[string]string{}
+	for _, option := range descriptionTemplateOptions {
+		descriptionChoices = append(descriptionChoices, option.Name)
+		descriptionLookup[option.Name] = option.Content
+	}
+	descriptionPreview := widget.NewLabel("Activate a description template to spark ideas.")
+	descriptionPreview.Wrapping = fyne.TextWrapWord
+	descriptionToggle := widget.NewRadioGroup(descriptionChoices, func(selected string) {
+		if selected == "" || selected == "Custom" {
+			descriptionPreview.SetText("Activate a description template to spark ideas.")
+			return
+		}
+		content := descriptionLookup[selected]
+		descriptionEntry.SetText(content)
+		descriptionPreview.SetText(content)
+	})
+	descriptionToggle.Horizontal = true
+	descriptionToggle.SetSelected("Custom")
+
+	templateCard := widget.NewCard("Ad Copy Templates", "Toggle a preset to instantly populate your copy fields.", container.NewVBox(
+		widget.NewLabelWithStyle("Headline Ideas", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		headlineToggle,
+		headlinePreview,
+		widget.NewSeparator(),
+		widget.NewLabelWithStyle("Description Ideas", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		descriptionToggle,
+		descriptionPreview,
+	))
 	competitorEntry := widget.NewMultiLineEntry()
 	competitorEntry.SetPlaceHolder("Comma separated competitor keywords or ASIN phrases")
 	importCSVButton := widget.NewButtonWithIcon("Import CSV", theme.FolderOpenIcon(), func() {
@@ -880,6 +947,9 @@ func buildCompetitiveTab(window fyne.Window, service *scraper.Service, countries
 		exportCampaignCSV(window, lastCampaignKeywords)
 	})
 	campaignControls.Objects = []fyne.CanvasObject{campaignCopy, campaignJSON, campaignCSV}
+
+	compliancePanel := container.NewVBox()
+	compliancePanel.Hide()
 
 	reverseButton := widget.NewButton("Run Reverse ASIN", func() {
 		asin := strings.TrimSpace(asinEntry.Text)
@@ -982,11 +1052,14 @@ func buildCompetitiveTab(window fyne.Window, service *scraper.Service, countries
 					safeSet(campaignResult, message)
 					lastCampaignKeywords = nil
 					campaignControls.Hide()
+					updateCompliancePanel(compliancePanel, nil)
 					return
 				}
 				lastCampaignKeywords = keywords
 				campaignControls.Show()
 				campaignControls.Refresh()
+				flagged := scraper.FlagIllegalKeywords(keywords)
+				updateCompliancePanel(compliancePanel, flagged)
 				safeSet(campaignResult, formatCampaignKeywords(keywords))
 			})
 		}()
@@ -1011,10 +1084,12 @@ func buildCompetitiveTab(window fyne.Window, service *scraper.Service, countries
 		widget.NewLabelWithStyle("Amazon Ads Planner", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		titleEntry,
 		descriptionEntry,
+		templateCard,
 		competitorInput,
 		campaignButton,
 		widget.NewSeparator(),
 		campaignControls,
+		compliancePanel,
 		newResultScroll(container.NewPadded(campaignLabel)),
 	)
 
@@ -1022,14 +1097,19 @@ func buildCompetitiveTab(window fyne.Window, service *scraper.Service, countries
 		widget.NewFormItem("Marketplace", countrySelect),
 	)
 
-	return container.NewBorder(sidebar, nil, nil, nil, container.NewVBox(reverseSection, widget.NewSeparator(), campaignSection))
+	columns := container.NewAdaptiveGrid(2,
+		container.NewPadded(reverseSection),
+		container.NewPadded(campaignSection),
+	)
+
+	return container.NewBorder(sidebar, nil, nil, nil, columns)
 }
 
 func buildInternationalTab(window fyne.Window, service *scraper.Service, countries []string, result binding.String, activity *serviceActivity, quota *quotaTracker) fyne.CanvasObject {
 	keywordEntry := widget.NewEntry()
 	keywordEntry.SetPlaceHolder("mindfulness journal")
 
-	countryGroup := widget.NewCheckGroup(countries, nil)
+	countryGroup := newRegionalCheckGroup(countries)
 	defaults := defaultInternationalSelection(countries)
 	if len(defaults) > 0 {
 		countryGroup.SetSelected(defaults)
@@ -1069,7 +1149,7 @@ func buildInternationalTab(window fyne.Window, service *scraper.Service, countri
 			return
 		}
 
-		selected := countryGroup.Selected
+		selected := countryGroup.Selected()
 		if len(selected) == 0 {
 			dialog.ShowInformation("International Research", "Select at least one marketplace to analyse.", window)
 			return
@@ -1118,7 +1198,7 @@ func buildInternationalTab(window fyne.Window, service *scraper.Service, countri
 	return container.NewVBox(
 		widget.NewLabelWithStyle("International Keyword Expansion", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		keywordEntry,
-		countryGroup,
+		countryGroup.Content(),
 		widget.NewButton("Generate Suggestions", fetch),
 		widget.NewSeparator(),
 		resultControls,
@@ -1686,6 +1766,60 @@ func formatCampaignKeywords(keywords []string) string {
 	return strings.TrimSpace(builder.String())
 }
 
+func updateCompliancePanel(panel *fyne.Container, keywords []string) {
+	if panel == nil {
+		return
+	}
+
+	panel.Objects = nil
+	if len(keywords) == 0 {
+		panel.Hide()
+		panel.Refresh()
+		return
+	}
+
+	badges := make([]fyne.CanvasObject, 0, len(keywords))
+	for _, keyword := range keywords {
+		if strings.TrimSpace(keyword) == "" {
+			continue
+		}
+		badges = append(badges, newComplianceBadge(keyword))
+	}
+
+	if len(badges) == 0 {
+		panel.Hide()
+		panel.Refresh()
+		return
+	}
+
+	warning := widget.NewLabel("Amazon Ads policies may reject the highlighted keywords. Remove or refine them before launching campaigns.")
+	warning.Wrapping = fyne.TextWrapWord
+
+	grid := container.NewAdaptiveGrid(3, badges...)
+	content := container.NewVBox(warning, grid)
+
+	panel.Objects = []fyne.CanvasObject{
+		widget.NewCard("Compliance Alerts", "Review policy risks before launching.", content),
+	}
+	panel.Show()
+	panel.Refresh()
+}
+
+func newComplianceBadge(keyword string) fyne.CanvasObject {
+	label := widget.NewLabelWithStyle(strings.TrimSpace(keyword), fyne.TextAlignCenter, fyne.TextStyle{Bold: true})
+	label.Wrapping = fyne.TextWrapWord
+
+	chipContent := container.NewHBox(layout.NewSpacer(), label, layout.NewSpacer())
+	padded := container.NewPadded(chipContent)
+
+	background := canvas.NewRectangle(theme.Color(theme.ColorNameError, theme.VariantLight))
+	background.CornerRadius = 8
+	background.StrokeColor = theme.Color(theme.ColorNameError, theme.VariantDark)
+	background.StrokeWidth = 1
+
+	return container.NewMax(background, padded)
+}
+
 func formatInternationalKeywords(keywords []scraper.InternationalKeyword) string {
 	if len(keywords) == 0 {
 		return "No international opportunities found yet. Try selecting more marketplaces."
@@ -1717,6 +1851,143 @@ func formatInternationalKeywords(keywords []scraper.InternationalKeyword) string
 	}
 
 	return strings.TrimSpace(builder.String())
+}
+
+type regionalCheckGroup struct {
+	container *fyne.Container
+	groups    []*widget.CheckGroup
+	onChanged func([]string)
+}
+
+func newRegionalCheckGroup(countries []string) *regionalCheckGroup {
+	grouped := map[string][]string{}
+	for _, code := range countries {
+		region := marketplaceRegion(code)
+		grouped[region] = append(grouped[region], code)
+	}
+
+	orderedRegions := []string{"North America", "Europe", "Asia Pacific", "Middle East", "South America", "Other Markets"}
+	objects := make([]fyne.CanvasObject, 0)
+	groups := make([]*widget.CheckGroup, 0)
+
+	addRegion := func(region string, codes []string) {
+		if len(codes) == 0 {
+			return
+		}
+		sort.SliceStable(codes, func(i, j int) bool { return strings.ToUpper(codes[i]) < strings.ToUpper(codes[j]) })
+		header := widget.NewLabelWithStyle(region, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+		options := make([]string, len(codes))
+		copy(options, codes)
+		check := widget.NewCheckGroup(options, nil)
+		check.Horizontal = true
+		groups = append(groups, check)
+		section := container.NewVBox(header, check)
+		objects = append(objects, section)
+	}
+
+	for _, region := range orderedRegions {
+		addRegion(region, grouped[region])
+		delete(grouped, region)
+	}
+
+	if len(grouped) > 0 {
+		leftover := make([]string, 0, len(grouped))
+		for region := range grouped {
+			leftover = append(leftover, region)
+		}
+		sort.Strings(leftover)
+		for _, region := range leftover {
+			addRegion(region, grouped[region])
+		}
+	}
+
+	if len(objects) == 0 {
+		fallback := widget.NewCheckGroup(countries, nil)
+		return &regionalCheckGroup{
+			container: container.NewVBox(fallback),
+			groups:    []*widget.CheckGroup{fallback},
+		}
+	}
+
+	groupContainer := container.NewVBox(objects...)
+	rg := &regionalCheckGroup{
+		container: groupContainer,
+		groups:    groups,
+	}
+	for _, group := range rg.groups {
+		current := group
+		current.OnChanged = func(_ []string) {
+			if rg.onChanged != nil {
+				rg.onChanged(rg.Selected())
+			}
+		}
+	}
+	return rg
+}
+
+func (r *regionalCheckGroup) Content() fyne.CanvasObject {
+	if r == nil {
+		return widget.NewLabel("No marketplaces available.")
+	}
+	return r.container
+}
+
+func (r *regionalCheckGroup) Selected() []string {
+	if r == nil {
+		return nil
+	}
+	combined := make([]string, 0)
+	for _, group := range r.groups {
+		combined = append(combined, group.Selected...)
+	}
+	sort.SliceStable(combined, func(i, j int) bool { return strings.ToUpper(combined[i]) < strings.ToUpper(combined[j]) })
+	return combined
+}
+
+func (r *regionalCheckGroup) SetSelected(values []string) {
+	if r == nil {
+		return
+	}
+	desired := map[string]struct{}{}
+	for _, value := range values {
+		desired[strings.ToUpper(value)] = struct{}{}
+	}
+	for _, group := range r.groups {
+		if group == nil {
+			continue
+		}
+		matching := make([]string, 0)
+		for _, option := range group.Options {
+			if _, ok := desired[strings.ToUpper(option)]; ok {
+				matching = append(matching, option)
+			}
+		}
+		group.SetSelected(matching)
+	}
+}
+
+func (r *regionalCheckGroup) OnChanged(fn func([]string)) {
+	if r == nil {
+		return
+	}
+	r.onChanged = fn
+}
+
+func marketplaceRegion(code string) string {
+	switch strings.ToUpper(code) {
+	case "US", "CA", "MX":
+		return "North America"
+	case "BR":
+		return "South America"
+	case "UK", "GB", "IE", "DE", "FR", "ES", "IT", "NL", "SE", "PL", "TR", "BE", "CH", "AT":
+		return "Europe"
+	case "AU", "NZ", "JP", "IN", "SG", "CN", "KR":
+		return "Asia Pacific"
+	case "AE", "SA", "EG", "QA":
+		return "Middle East"
+	default:
+		return "Other Markets"
+	}
 }
 
 func parseKeywordFilter(minVolume, maxCompetition, maxDensity string) (scraper.KeywordFilter, error) {
