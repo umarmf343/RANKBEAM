@@ -470,7 +470,7 @@
                   <div class="absolute -left-6 top-6 h-16 w-16 rounded-full bg-brand-500/30 blur-3xl"></div>
                   <div class="absolute -right-10 bottom-8 h-20 w-20 rounded-full bg-cyan-400/20 blur-3xl"></div>
                   <div class="relative rounded-3xl border border-white/10 bg-white/10 p-8 shadow-glow">
-                    <form id="subscribeForm" data-api-base="/license-api/paystack" class="space-y-6" autocomplete="off">
+                    <form id="subscribeForm" data-api-base="./paystack" class="space-y-6" autocomplete="off">
                       <div>
                         <label for="plan" class="text-sm font-semibold text-white">Choose plan</label>
                         <select
@@ -691,7 +691,8 @@
         setSubmitting(true);
         showMessage('success', 'Connecting to Paystack...');
 
-        const apiBase = subscribeForm.dataset.apiBase || '/paystack';
+        const rawApiBase = subscribeForm.dataset.apiBase || './paystack';
+        const apiBase = rawApiBase.replace(/\/+$/, '') || './paystack';
 
         try {
           const response = await fetch(`${apiBase}/subscribe`, {
