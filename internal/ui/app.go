@@ -43,6 +43,22 @@ func newResultScroll(content fyne.CanvasObject) *container.Scroll {
 
 var activeService *scraper.Service
 
+type keywordPreset struct {
+	Name           string
+	Seed           string
+	Country        string
+	MinVolume      string
+	MaxCompetition string
+	MaxDensity     string
+	MaxRank        string
+	IndieOnly      bool
+}
+
+var (
+	keywordPresetLock sync.Mutex
+	keywordPresets    []keywordPreset
+)
+
 // Run initialises and displays the desktop application.
 func Run() {
 	application := app.NewWithID("rankbeam")
@@ -226,21 +242,30 @@ func buildProductLookupTab(window fyne.Window, service *scraper.Service, countri
 		activity.Start()
 		quota.Use()
 
-		progress := dialog.NewProgressInfinite("Fetching Product", fmt.Sprintf("Looking up %s on %s…", strings.ToUpper(asin), strings.ToUpper(country)), window)
-		progress.Show()
+		ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
+		progress := newCancelableProgress(window, "Fetching Product", fmt.Sprintf("Looking up %s on %s…", strings.ToUpper(asin), strings.ToUpper(country)), cancel)
+		if progress != nil {
+			progress.Show()
+		}
 
 		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
 			defer cancel()
 
 			details, err := service.FetchProduct(ctx, asin, country)
 
 			queueOnMain(window, func() {
 				activity.Done()
-				progress.Hide()
+				if progress != nil {
+					progress.Hide()
+				}
 				if err != nil {
-					dialog.ShowError(err, window)
-					safeSet(result, fmt.Sprintf("Unable to fetch product: %v", err))
+					if errors.Is(err, context.Canceled) {
+						safeSet(result, "Request cancelled.")
+					} else {
+						dialog.ShowError(err, window)
+						safeSet(result, fmt.Sprintf("Unable to fetch product: %v", err))
+					}
+					lastProduct = nil
 					updateProductCards(productCards, summaryLabel, nil)
 					controlRow.Hide()
 					return
@@ -298,6 +323,130 @@ func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, count
 	categoryLabel.Wrapping = fyne.TextWrapWord
 	bestsellerLabel := widget.NewLabelWithData(bestsellerResult)
 	bestsellerLabel.Wrapping = fyne.TextWrapWord
+
+	presetNameEntry := widget.NewEntry()
+	presetNameEntry.SetPlaceHolder("Preset name")
+
+	presetListData := binding.NewStringList()
+	if err := presetListData.Set(listKeywordPresetNames()); err != nil {
+		fyne.LogError("unable to populate preset list", err)
+	}
+	selectedPresetIndex := -1
+
+	presetList := widget.NewListWithData(presetListData,
+		func() fyne.CanvasObject {
+			label := widget.NewLabel("")
+			label.Wrapping = fyne.TextWrapWord
+			return container.NewPadded(label)
+		},
+		func(data binding.DataItem, item fyne.CanvasObject) {
+			bindingString, ok := data.(binding.String)
+			if !ok {
+				return
+			}
+			text, err := bindingString.Get()
+			if err != nil {
+				fyne.LogError("unable to read preset name", err)
+				return
+			}
+			if padded, ok := item.(*fyne.Container); ok && len(padded.Objects) > 0 {
+				if label, ok := padded.Objects[0].(*widget.Label); ok {
+					label.SetText(text)
+				}
+			}
+		})
+	presetList.SetMinSize(fyne.NewSize(220, 240))
+
+	refreshPresetList := func(targetName string) {
+		names := listKeywordPresetNames()
+		if err := presetListData.Set(names); err != nil {
+			fyne.LogError("unable to refresh preset names", err)
+		}
+		selectedPresetIndex = -1
+		if strings.TrimSpace(targetName) == "" {
+			return
+		}
+		for i, name := range names {
+			if strings.EqualFold(name, targetName) {
+				presetList.Select(i)
+				selectedPresetIndex = i
+				return
+			}
+		}
+	}
+
+	presetList.OnSelected = func(id widget.ListItemID) {
+		preset, ok := getKeywordPreset(int(id))
+		if !ok {
+			return
+		}
+		selectedPresetIndex = int(id)
+		presetNameEntry.SetText(preset.Name)
+		keywordEntry.SetText(preset.Seed)
+		if preset.Country != "" {
+			for _, option := range countries {
+				if option == preset.Country {
+					countrySelect.SetSelected(preset.Country)
+					break
+				}
+			}
+		}
+		minVolumeEntry.SetText(preset.MinVolume)
+		maxCompetitionEntry.SetText(preset.MaxCompetition)
+		maxDensityEntry.SetText(preset.MaxDensity)
+		maxRankEntry.SetText(preset.MaxRank)
+		indieOnlyCheck.SetChecked(preset.IndieOnly)
+	}
+
+	presetList.OnUnselected = func(id widget.ListItemID) {
+		if selectedPresetIndex == int(id) {
+			selectedPresetIndex = -1
+		}
+	}
+
+	presetInfo := widget.NewLabel("Bookmark frequent keyword settings and reload them instantly.")
+	presetInfo.Wrapping = fyne.TextWrapWord
+
+	savePresetButton := widget.NewButtonWithIcon("Save Preset", theme.ContentAddIcon(), func() {
+		name := strings.TrimSpace(presetNameEntry.Text)
+		if name == "" {
+			dialog.ShowInformation("Research Presets", "Enter a preset name before saving.", window)
+			return
+		}
+		seed := strings.TrimSpace(keywordEntry.Text)
+		if seed == "" {
+			dialog.ShowInformation("Research Presets", "Provide a seed keyword to save.", window)
+			return
+		}
+
+		preset := keywordPreset{
+			Name:           name,
+			Seed:           seed,
+			Country:        strings.TrimSpace(countrySelect.Selected),
+			MinVolume:      strings.TrimSpace(minVolumeEntry.Text),
+			MaxCompetition: strings.TrimSpace(maxCompetitionEntry.Text),
+			MaxDensity:     strings.TrimSpace(maxDensityEntry.Text),
+			MaxRank:        strings.TrimSpace(maxRankEntry.Text),
+			IndieOnly:      indieOnlyCheck.Checked,
+		}
+
+		saveKeywordPreset(preset)
+		refreshPresetList(preset.Name)
+		presetNameEntry.SetText(preset.Name)
+	})
+
+	deletePresetButton := widget.NewButtonWithIcon("Delete Preset", theme.DeleteIcon(), func() {
+		if selectedPresetIndex < 0 {
+			dialog.ShowInformation("Research Presets", "Select a preset to delete.", window)
+			return
+		}
+		if !deleteKeywordPreset(selectedPresetIndex) {
+			dialog.ShowError(errors.New("unable to delete preset"), window)
+			return
+		}
+		refreshPresetList("")
+		presetNameEntry.SetText("")
+	})
 
 	keywordChart := container.NewVBox(widget.NewLabel("Keyword suggestions will appear here."))
 
@@ -400,21 +549,31 @@ func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, count
 		activity.Start()
 		quota.Use()
 
-		progress := dialog.NewProgressInfinite("Keyword Research", fmt.Sprintf("Collecting ideas for \"%s\"…", seed), window)
-		progress.Show()
+		ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
+		progress := newCancelableProgress(window, "Keyword Research", fmt.Sprintf("Collecting ideas for \"%s\"…", seed), cancel)
+		if progress != nil {
+			progress.Show()
+		}
 
 		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
 			defer cancel()
 
 			insights, err := service.KeywordSuggestions(ctx, seed, country, filters)
 
 			queueOnMain(window, func() {
 				activity.Done()
-				progress.Hide()
+				if progress != nil {
+					progress.Hide()
+				}
 				if err != nil {
-					dialog.ShowError(err, window)
-					safeSet(keywordResult, fmt.Sprintf("Unable to fetch keyword suggestions: %v", err))
+					if !errors.Is(err, context.Canceled) {
+						dialog.ShowError(err, window)
+					}
+					message := "Request cancelled."
+					if !errors.Is(err, context.Canceled) {
+						message = fmt.Sprintf("Unable to fetch keyword suggestions: %v", err)
+					}
+					safeSet(keywordResult, message)
 					lastKeywordInsights = nil
 					keywordControls.Hide()
 					keywordChart.Objects = []fyne.CanvasObject{widget.NewLabel("No keyword suggestions available yet.")}
@@ -445,21 +604,31 @@ func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, count
 		activity.Start()
 		quota.Use()
 
-		progress := dialog.NewProgressInfinite("Category Insights", "Discovering high performing categories…", window)
-		progress.Show()
+		ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
+		progress := newCancelableProgress(window, "Category Insights", "Discovering high performing categories…", cancel)
+		if progress != nil {
+			progress.Show()
+		}
 
 		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
 			defer cancel()
 
 			trends, err := service.FetchCategoryTrends(ctx, seed, country)
 
 			queueOnMain(window, func() {
 				activity.Done()
-				progress.Hide()
+				if progress != nil {
+					progress.Hide()
+				}
 				if err != nil {
-					dialog.ShowError(err, window)
-					safeSet(categoryResult, fmt.Sprintf("Unable to fetch category insights: %v", err))
+					if !errors.Is(err, context.Canceled) {
+						dialog.ShowError(err, window)
+					}
+					message := "Request cancelled."
+					if !errors.Is(err, context.Canceled) {
+						message = fmt.Sprintf("Unable to fetch category insights: %v", err)
+					}
+					safeSet(categoryResult, message)
 					lastCategoryTrends = nil
 					categoryControls.Hide()
 					return
@@ -493,21 +662,31 @@ func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, count
 		activity.Start()
 		quota.Use()
 
-		progress := dialog.NewProgressInfinite("Bestseller Snapshot", fmt.Sprintf("Reviewing top results for \"%s\"…", seed), window)
-		progress.Show()
+		ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
+		progress := newCancelableProgress(window, "Bestseller Snapshot", fmt.Sprintf("Reviewing top results for \"%s\"…", seed), cancel)
+		if progress != nil {
+			progress.Show()
+		}
 
 		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
 			defer cancel()
 
 			products, err := service.BestsellerAnalysis(ctx, seed, country, filter)
 
 			queueOnMain(window, func() {
 				activity.Done()
-				progress.Hide()
+				if progress != nil {
+					progress.Hide()
+				}
 				if err != nil {
-					dialog.ShowError(err, window)
-					safeSet(bestsellerResult, fmt.Sprintf("Unable to analyse bestsellers: %v", err))
+					if !errors.Is(err, context.Canceled) {
+						dialog.ShowError(err, window)
+					}
+					message := "Request cancelled."
+					if !errors.Is(err, context.Canceled) {
+						message = fmt.Sprintf("Unable to analyse bestsellers: %v", err)
+					}
+					safeSet(bestsellerResult, message)
 					lastBestsellers = nil
 					bestsellerControls.Hide()
 					return
@@ -542,27 +721,41 @@ func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, count
 	)
 	advancedFilters.MultiOpen = true
 
-	keywordOutputs := newResultScroll(container.NewVBox(
-		container.NewVBox(
-			container.NewHBox(widget.NewLabelWithStyle("Keyword Suggestions", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), layout.NewSpacer(), keywordInfoHeader),
-			keywordControls,
-			keywordChart,
-			widget.NewSeparator(),
-			keywordLabel,
-		),
+	keywordTabContent := newResultScroll(container.NewVBox(
+		container.NewHBox(widget.NewLabelWithStyle("Keyword Suggestions", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), layout.NewSpacer(), keywordInfoHeader),
+		keywordControls,
+		keywordChart,
 		widget.NewSeparator(),
-		container.NewVBox(
-			container.NewHBox(widget.NewLabelWithStyle("Category Intelligence", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), layout.NewSpacer(), categoryInfoHeader),
-			categoryControls,
-			categoryLabel,
-		),
-		widget.NewSeparator(),
-		container.NewVBox(
-			container.NewHBox(widget.NewLabelWithStyle("Bestseller Analysis", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), layout.NewSpacer(), bestsellerInfoHeader),
-			bestsellerControls,
-			bestsellerLabel,
-		),
+		keywordLabel,
 	))
+
+	categoryTabContent := newResultScroll(container.NewVBox(
+		container.NewHBox(widget.NewLabelWithStyle("Category Intelligence", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), layout.NewSpacer(), categoryInfoHeader),
+		categoryControls,
+		categoryLabel,
+	))
+
+	bestsellerTabContent := newResultScroll(container.NewVBox(
+		container.NewHBox(widget.NewLabelWithStyle("Bestseller Analysis", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), layout.NewSpacer(), bestsellerInfoHeader),
+		bestsellerControls,
+		bestsellerLabel,
+	))
+
+	keywordOutputs := container.NewAppTabs(
+		container.NewTabItem("Keywords", keywordTabContent),
+		container.NewTabItem("Categories", categoryTabContent),
+		container.NewTabItem("Bestsellers", bestsellerTabContent),
+	)
+	keywordOutputs.SetTabLocation(container.TabLocationTop)
+
+        presetSidebar := container.NewVBox(
+                widget.NewLabelWithStyle("Research Presets", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+                presetInfo,
+                presetNameEntry,
+                container.NewGridWithColumns(1, savePresetButton),
+                widget.NewSeparator(),
+                container.NewBorder(nil, container.NewHBox(deletePresetButton, layout.NewSpacer()), nil, nil, presetList),
+        )
 
 	form := widget.NewForm(
 		widget.NewFormItem("Seed Keyword", keywordEntry),
@@ -571,7 +764,7 @@ func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, count
 	form.SubmitText = "Fetch Suggestions"
 	form.OnSubmit = fetchKeywords
 
-	return container.NewVBox(
+	mainContent := container.NewVBox(
 		widget.NewLabelWithStyle("Keyword Research Toolkit", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		form,
 		advancedFilters,
@@ -580,6 +773,11 @@ func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, count
 		widget.NewSeparator(),
 		keywordOutputs,
 	)
+
+	split := container.NewHSplit(container.NewPadded(presetSidebar), container.NewPadded(mainContent))
+	split.SetOffset(0.28)
+
+	return split
 }
 
 func buildCompetitiveTab(window fyne.Window, service *scraper.Service, countries []string, reverseResult, campaignResult binding.String, activity *serviceActivity, quota *quotaTracker) fyne.CanvasObject {
@@ -604,6 +802,32 @@ func buildCompetitiveTab(window fyne.Window, service *scraper.Service, countries
 	descriptionEntry.SetPlaceHolder("Paste your blurb or key selling points here…")
 	competitorEntry := widget.NewMultiLineEntry()
 	competitorEntry.SetPlaceHolder("Comma separated competitor keywords or ASIN phrases")
+	importCSVButton := widget.NewButtonWithIcon("Import CSV", theme.FolderOpenIcon(), func() {
+		fileDialog := dialog.NewFileOpen(func(reader fyne.URIReadCloser, err error) {
+			if err != nil {
+				dialog.ShowError(err, window)
+				return
+			}
+			if reader == nil {
+				return
+			}
+			defer reader.Close()
+
+			data, err := io.ReadAll(reader)
+			if err != nil {
+				dialog.ShowError(fmt.Errorf("unable to read CSV: %w", err), window)
+				return
+			}
+			keywords, err := parseCSVKeywords(string(data))
+			if err != nil {
+				dialog.ShowError(fmt.Errorf("unable to parse CSV: %w", err), window)
+				return
+			}
+			competitorEntry.SetText(strings.Join(keywords, "\n"))
+		}, window)
+		fileDialog.SetFilter(storage.NewExtensionFileFilter([]string{".csv"}))
+		fileDialog.Show()
+	})
 
 	reverseLabel := widget.NewLabelWithData(reverseResult)
 	reverseLabel.Wrapping = fyne.TextWrapWord
@@ -678,21 +902,31 @@ func buildCompetitiveTab(window fyne.Window, service *scraper.Service, countries
 		activity.Start()
 		quota.Use()
 
-		progress := dialog.NewProgressInfinite("Reverse ASIN", fmt.Sprintf("Investigating %s…", strings.ToUpper(asin)), window)
-		progress.Show()
+		ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
+		progress := newCancelableProgress(window, "Reverse ASIN", fmt.Sprintf("Investigating %s…", strings.ToUpper(asin)), cancel)
+		if progress != nil {
+			progress.Show()
+		}
 
 		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
 			defer cancel()
 
 			insights, err := service.ReverseASINSearch(ctx, asin, country, filters)
 
 			queueOnMain(window, func() {
 				activity.Done()
-				progress.Hide()
+				if progress != nil {
+					progress.Hide()
+				}
 				if err != nil {
-					dialog.ShowError(err, window)
-					safeSet(reverseResult, fmt.Sprintf("Unable to run reverse ASIN: %v", err))
+					if !errors.Is(err, context.Canceled) {
+						dialog.ShowError(err, window)
+					}
+					message := "Request cancelled."
+					if !errors.Is(err, context.Canceled) {
+						message = fmt.Sprintf("Unable to run reverse ASIN: %v", err)
+					}
+					safeSet(reverseResult, message)
 					lastReverseInsights = nil
 					reverseControls.Hide()
 					return
@@ -721,21 +955,31 @@ func buildCompetitiveTab(window fyne.Window, service *scraper.Service, countries
 		activity.Start()
 		quota.Use()
 
-		progress := dialog.NewProgressInfinite("Campaign Builder", "Composing Amazon Ads keyword list…", window)
-		progress.Show()
+		ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
+		progress := newCancelableProgress(window, "Campaign Builder", "Composing Amazon Ads keyword list…", cancel)
+		if progress != nil {
+			progress.Show()
+		}
 
 		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
 			defer cancel()
 
 			keywords, err := service.GenerateAMSKeywords(ctx, titleEntry.Text, descriptionEntry.Text, competitors, country)
 
 			queueOnMain(window, func() {
 				activity.Done()
-				progress.Hide()
+				if progress != nil {
+					progress.Hide()
+				}
 				if err != nil {
-					dialog.ShowError(err, window)
-					safeSet(campaignResult, fmt.Sprintf("Unable to generate campaign keywords: %v", err))
+					if !errors.Is(err, context.Canceled) {
+						dialog.ShowError(err, window)
+					}
+					message := "Request cancelled."
+					if !errors.Is(err, context.Canceled) {
+						message = fmt.Sprintf("Unable to generate campaign keywords: %v", err)
+					}
+					safeSet(campaignResult, message)
 					lastCampaignKeywords = nil
 					campaignControls.Hide()
 					return
@@ -758,11 +1002,16 @@ func buildCompetitiveTab(window fyne.Window, service *scraper.Service, countries
 		newResultScroll(container.NewPadded(reverseLabel)),
 	)
 
+	competitorInput := container.NewVBox(
+		competitorEntry,
+		container.NewHBox(importCSVButton, layout.NewSpacer()),
+	)
+
 	campaignSection := container.NewVBox(
 		widget.NewLabelWithStyle("Amazon Ads Planner", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		titleEntry,
 		descriptionEntry,
-		competitorEntry,
+		competitorInput,
 		campaignButton,
 		widget.NewSeparator(),
 		campaignControls,
@@ -829,21 +1078,31 @@ func buildInternationalTab(window fyne.Window, service *scraper.Service, countri
 		activity.Start()
 		quota.Use()
 
-		progress := dialog.NewProgressInfinite("International Research", "Localising your keyword list…", window)
-		progress.Show()
+		ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
+		progress := newCancelableProgress(window, "International Research", "Localising your keyword list…", cancel)
+		if progress != nil {
+			progress.Show()
+		}
 
 		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
 			defer cancel()
 
 			keywords, err := service.InternationalKeywords(ctx, keyword, selected)
 
 			queueOnMain(window, func() {
 				activity.Done()
-				progress.Hide()
+				if progress != nil {
+					progress.Hide()
+				}
 				if err != nil {
-					dialog.ShowError(err, window)
-					safeSet(result, fmt.Sprintf("Unable to fetch international keywords: %v", err))
+					if !errors.Is(err, context.Canceled) {
+						dialog.ShowError(err, window)
+					}
+					message := "Request cancelled."
+					if !errors.Is(err, context.Canceled) {
+						message = fmt.Sprintf("Unable to fetch international keywords: %v", err)
+					}
+					safeSet(result, message)
 					lastInternational = nil
 					resultControls.Hide()
 					return
@@ -1548,6 +1807,109 @@ func safeSet(target binding.String, value string) {
 	if err := target.Set(value); err != nil {
 		fyne.LogError("failed to update binding", err)
 	}
+}
+
+type cancelableProgress struct {
+	dialog         dialog.Dialog
+	message        *widget.Label
+	cancelBtn      *widget.Button
+	cancel         context.CancelFunc
+	cancelOnce     sync.Once
+	initialMessage string
+}
+
+func newCancelableProgress(window fyne.Window, title, message string, cancel context.CancelFunc) *cancelableProgress {
+	if window == nil {
+		return nil
+	}
+
+	label := widget.NewLabel(message)
+	bar := widget.NewProgressBarInfinite()
+	cancelBtn := widget.NewButtonWithIcon("Cancel", theme.CancelIcon(), nil)
+
+	progress := &cancelableProgress{message: label, cancelBtn: cancelBtn, cancel: cancel, initialMessage: message}
+	cancelBtn.OnTapped = func() {
+		progress.cancelOnce.Do(func() {
+			label.SetText("Cancelling…")
+			cancelBtn.Disable()
+			if progress.cancel != nil {
+				progress.cancel()
+			}
+		})
+	}
+
+	content := container.NewVBox(label, bar, cancelBtn)
+	progress.dialog = dialog.NewCustomWithoutButtons(title, content, window)
+	return progress
+}
+
+func (p *cancelableProgress) Show() {
+	if p == nil || p.dialog == nil {
+		return
+	}
+	p.cancelOnce = sync.Once{}
+	p.cancelBtn.Enable()
+	if p.message != nil {
+		p.message.SetText(p.initialMessage)
+	}
+	p.dialog.Show()
+}
+
+func (p *cancelableProgress) Hide() {
+	if p == nil || p.dialog == nil {
+		return
+	}
+	p.dialog.Hide()
+}
+
+func listKeywordPresetNames() []string {
+	keywordPresetLock.Lock()
+	defer keywordPresetLock.Unlock()
+
+	names := make([]string, len(keywordPresets))
+	for i, preset := range keywordPresets {
+		if strings.TrimSpace(preset.Name) == "" {
+			names[i] = fmt.Sprintf("Preset %d", i+1)
+			continue
+		}
+		names[i] = preset.Name
+	}
+	return names
+}
+
+func saveKeywordPreset(p keywordPreset) {
+	keywordPresetLock.Lock()
+	defer keywordPresetLock.Unlock()
+
+	// Replace preset with same name if it exists to keep sidebar tidy.
+	for i, existing := range keywordPresets {
+		if strings.EqualFold(strings.TrimSpace(existing.Name), strings.TrimSpace(p.Name)) && strings.TrimSpace(p.Name) != "" {
+			keywordPresets[i] = p
+			return
+		}
+	}
+	keywordPresets = append(keywordPresets, p)
+}
+
+func getKeywordPreset(index int) (keywordPreset, bool) {
+	keywordPresetLock.Lock()
+	defer keywordPresetLock.Unlock()
+
+	if index < 0 || index >= len(keywordPresets) {
+		return keywordPreset{}, false
+	}
+	return keywordPresets[index], true
+}
+
+func deleteKeywordPreset(index int) bool {
+	keywordPresetLock.Lock()
+	defer keywordPresetLock.Unlock()
+
+	if index < 0 || index >= len(keywordPresets) {
+		return false
+	}
+	keywordPresets = append(keywordPresets[:index], keywordPresets[index+1:]...)
+	return true
 }
 
 type queueableWindow interface {
