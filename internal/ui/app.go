@@ -56,22 +56,11 @@ func Run() {
 	window.Resize(fyne.NewSize(1024, 720))
 	window.SetMaster()
 
-	client, licenseData, licenseError := enforceLicense()
-	if licenseError != "" {
-		renderLicenseFailure(window, client, licenseError, licenseData)
-		window.ShowAndRun()
-		return
-	}
-
-	if licenseData != nil {
-		loadMainApplication(window, licenseData.Key)
-	} else {
-		loadMainApplication(window, "")
-	}
+	loadMainApplication(window)
 	window.ShowAndRun()
 }
 
-func loadMainApplication(window fyne.Window, licenseKey string) {
+func loadMainApplication(window fyne.Window) {
 	if window == nil {
 		return
 	}
@@ -127,12 +116,7 @@ func loadMainApplication(window fyne.Window, licenseKey string) {
 	topBar := container.NewPadded(container.NewHBox(layout.NewSpacer(), tutorialButton))
 
 	window.SetContent(container.NewBorder(topBar, nil, nil, nil, tabs))
-
-	title := "RankBeam"
-	if licenseKey != "" {
-		title = fmt.Sprintf("%s — License %s", title, summarizeKey(licenseKey))
-	}
-	window.SetTitle(title)
+	window.SetTitle("RankBeam")
 }
 
 func buildProductLookupTab(window fyne.Window, service *scraper.Service, countries []string, result binding.String) fyne.CanvasObject {

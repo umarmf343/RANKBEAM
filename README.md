@@ -46,9 +46,7 @@ GOOS=windows GOARCH=amd64 go build -o rankbeam.exe ./cmd/app
 
 More detailed packaging instructions (including the Inno Setup installer) are available in [`docs/BUILD_WINDOWS.md`](docs/BUILD_WINDOWS.md).
 
-Looking to ship the desktop app with the Paystack-backed subscription flow? Start with [`Paystack licence Guide.txt`](Paystack%20licence%20Guide.txt).
-
-Need a concise packaging checklist? Follow [`inno setup.txt`](inno%20setup.txt).
+Packaging tips for Windows builds are collected in [`docs/BUILD_WINDOWS.md`](docs/BUILD_WINDOWS.md).
 
 **Product List**
 ![alt text](https://i.imgur.com/ES5M4Rx.png)
