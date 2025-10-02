@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"encoding/csv"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -10,14 +11,17 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/data/binding"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/layout"
+	"fyne.io/fyne/v2/storage"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
@@ -82,6 +86,12 @@ func loadMainApplication(window fyne.Window) {
 	countries := scraper.Countries()
 	sort.Strings(countries)
 
+	statusBinding := binding.NewString()
+	statusBinding.Set("🟢 Service ready")
+	quotaBinding := binding.NewString()
+	quotaTracker := newQuotaTracker(25, quotaBinding)
+	activityTracker := newServiceActivity(statusBinding)
+
 	productBinding := binding.NewString()
 	productBinding.Set("Enter an ASIN and press Fetch Product to begin.")
 	keywordBinding := binding.NewString()
@@ -98,10 +108,10 @@ func loadMainApplication(window fyne.Window) {
 	internationalBinding.Set("International keyword suggestions will appear here.")
 
 	tabs := container.NewAppTabs(
-		container.NewTabItem("Product Lookup", buildProductLookupTab(window, service, countries, productBinding)),
-		container.NewTabItem("Keyword Research", buildKeywordResearchTab(window, service, countries, keywordBinding, categoryBinding, bestsellerBinding)),
-		container.NewTabItem("Competitive Analysis", buildCompetitiveTab(window, service, countries, reverseBinding, campaignBinding)),
-		container.NewTabItem("International", buildInternationalTab(window, service, countries, internationalBinding)),
+		container.NewTabItem("Product Lookup", buildProductLookupTab(window, service, countries, productBinding, activityTracker, quotaTracker)),
+		container.NewTabItem("Keyword Research", buildKeywordResearchTab(window, service, countries, keywordBinding, categoryBinding, bestsellerBinding, activityTracker, quotaTracker)),
+		container.NewTabItem("Competitive Analysis", buildCompetitiveTab(window, service, countries, reverseBinding, campaignBinding, activityTracker, quotaTracker)),
+		container.NewTabItem("International", buildInternationalTab(window, service, countries, internationalBinding, activityTracker, quotaTracker)),
 	)
 	tabs.SetTabLocation(container.TabLocationTop)
 
@@ -120,13 +130,25 @@ func loadMainApplication(window fyne.Window) {
 	})
 	tutorialButton.Importance = widget.HighImportance
 
-	topBar := container.NewPadded(container.NewHBox(layout.NewSpacer(), tutorialButton))
+	statusLabel := widget.NewLabelWithData(statusBinding)
+	quotaLabel := widget.NewLabelWithData(quotaBinding)
+	topBar := container.NewPadded(container.NewHBox(
+		statusLabel,
+		widget.NewLabel("•"),
+		quotaLabel,
+		layout.NewSpacer(),
+		tutorialButton,
+	))
 
 	window.SetContent(container.NewBorder(topBar, nil, nil, nil, tabs))
 	window.SetTitle("RankBeam")
+
+	window.SetOnClosed(func() {
+		quotaTracker.Stop()
+	})
 }
 
-func buildProductLookupTab(window fyne.Window, service *scraper.Service, countries []string, result binding.String) fyne.CanvasObject {
+func buildProductLookupTab(window fyne.Window, service *scraper.Service, countries []string, result binding.String, activity *serviceActivity, quota *quotaTracker) fyne.CanvasObject {
 	asinEntry := widget.NewEntry()
 	asinEntry.SetPlaceHolder("B08N5WRWNW")
 
@@ -135,20 +157,74 @@ func buildProductLookupTab(window fyne.Window, service *scraper.Service, countri
 		countrySelect.SetSelected(countries[0])
 	}
 
-	resultLabel := widget.NewLabelWithData(result)
-	resultLabel.Wrapping = fyne.TextWrapWord
+	summaryLabel := widget.NewLabelWithData(result)
+	summaryLabel.Wrapping = fyne.TextWrapWord
+
+	validationHint := canvas.NewText("ASINs are 10 characters (A-Z, 0-9).", theme.DisabledColor())
+	validationHint.Alignment = fyne.TextAlignLeading
+
+	var lastProduct *scraper.ProductDetails
+
+	productCards := container.NewVBox(summaryLabel)
+
+	copyButton := widget.NewButtonWithIcon("Copy Summary", theme.ContentCopyIcon(), func() {
+		if lastProduct == nil {
+			return
+		}
+		copyToClipboard(window, formatProductDetails(lastProduct))
+	})
+	jsonButton := widget.NewButtonWithIcon("Export JSON", theme.DocumentIcon(), func() {
+		if lastProduct == nil {
+			return
+		}
+		exportJSON(window, "product.json", lastProduct)
+	})
+	csvButton := widget.NewButtonWithIcon("Export CSV", theme.DocumentIcon(), func() {
+		if lastProduct == nil {
+			return
+		}
+		exportProductCSV(window, lastProduct)
+	})
+
+	controlRow := container.NewHBox(copyButton, jsonButton, csvButton)
+	controlRow.Hide()
+
+	asinEntry.OnChanged = func(value string) {
+		cleaned := strings.ToUpper(strings.TrimSpace(value))
+		if value != cleaned {
+			asinEntry.SetText(cleaned)
+			return
+		}
+		switch {
+		case cleaned == "":
+			validationHint.Text = "Enter an ASIN to begin."
+			validationHint.Color = theme.DisabledColor()
+		case isValidASIN(cleaned):
+			validationHint.Text = "Looks good! Press Fetch Product when you're ready."
+			validationHint.Color = theme.PrimaryColor()
+		default:
+			validationHint.Text = "ASINs must be 10 uppercase characters without spaces."
+			validationHint.Color = theme.ErrorColor()
+		}
+		validationHint.Refresh()
+	}
 
 	fetch := func() {
-		asin := strings.TrimSpace(asinEntry.Text)
+		asin := strings.TrimSpace(strings.ToUpper(asinEntry.Text))
 		country := strings.TrimSpace(countrySelect.Selected)
-		if asin == "" {
-			dialog.ShowInformation("Product Lookup", "Enter a valid ASIN to continue.", window)
+		if !isValidASIN(asin) {
+			validationHint.Text = "ASINs must be 10 uppercase characters without spaces."
+			validationHint.Color = theme.ErrorColor()
+			validationHint.Refresh()
 			return
 		}
 		if country == "" {
 			dialog.ShowInformation("Product Lookup", "Select the Amazon marketplace you wish to query.", window)
 			return
 		}
+
+		activity.Start()
+		quota.Use()
 
 		progress := dialog.NewProgressInfinite("Fetching Product", fmt.Sprintf("Looking up %s on %s…", strings.ToUpper(asin), strings.ToUpper(country)), window)
 		progress.Show()
@@ -160,13 +236,19 @@ func buildProductLookupTab(window fyne.Window, service *scraper.Service, countri
 			details, err := service.FetchProduct(ctx, asin, country)
 
 			queueOnMain(window, func() {
+				activity.Done()
 				progress.Hide()
 				if err != nil {
 					dialog.ShowError(err, window)
 					safeSet(result, fmt.Sprintf("Unable to fetch product: %v", err))
+					updateProductCards(productCards, summaryLabel, nil)
+					controlRow.Hide()
 					return
 				}
+				lastProduct = details
 				safeSet(result, formatProductDetails(details))
+				updateProductCards(productCards, summaryLabel, details)
+				controlRow.Show()
 			})
 		}()
 	}
@@ -180,14 +262,17 @@ func buildProductLookupTab(window fyne.Window, service *scraper.Service, countri
 
 	content := container.NewVBox(
 		form,
+		container.NewHBox(validationHint, layout.NewSpacer()),
 		widget.NewSeparator(),
-		newResultScroll(container.NewPadded(resultLabel)),
+		controlRow,
+		widget.NewSeparator(),
+		newResultScroll(container.NewPadded(productCards)),
 	)
 
 	return content
 }
 
-func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, countries []string, keywordResult, categoryResult, bestsellerResult binding.String) fyne.CanvasObject {
+func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, countries []string, keywordResult, categoryResult, bestsellerResult binding.String, activity *serviceActivity, quota *quotaTracker) fyne.CanvasObject {
 	keywordEntry := widget.NewEntry()
 	keywordEntry.SetPlaceHolder("children's book about space")
 
@@ -214,6 +299,86 @@ func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, count
 	bestsellerLabel := widget.NewLabelWithData(bestsellerResult)
 	bestsellerLabel.Wrapping = fyne.TextWrapWord
 
+	keywordChart := container.NewVBox(widget.NewLabel("Keyword suggestions will appear here."))
+
+	var lastKeywordInsights []scraper.KeywordInsight
+	var lastCategoryTrends []scraper.CategoryTrend
+	var lastBestsellers []scraper.BestsellerProduct
+
+	keywordControls := container.NewHBox()
+	keywordControls.Hide()
+	keywordCopy := widget.NewButtonWithIcon("Copy", theme.ContentCopyIcon(), func() {
+		if len(lastKeywordInsights) == 0 {
+			return
+		}
+		copyToClipboard(window, formatKeywordInsights(lastKeywordInsights))
+	})
+	keywordJSON := widget.NewButtonWithIcon("Export JSON", theme.DocumentIcon(), func() {
+		if len(lastKeywordInsights) == 0 {
+			return
+		}
+		exportJSON(window, "keywords.json", lastKeywordInsights)
+	})
+	keywordCSV := widget.NewButtonWithIcon("Export CSV", theme.DocumentIcon(), func() {
+		if len(lastKeywordInsights) == 0 {
+			return
+		}
+		exportKeywordCSV(window, lastKeywordInsights)
+	})
+	keywordControls.Objects = []fyne.CanvasObject{keywordCopy, keywordJSON, keywordCSV}
+
+	categoryControls := container.NewHBox()
+	categoryControls.Hide()
+	categoryCopy := widget.NewButtonWithIcon("Copy", theme.ContentCopyIcon(), func() {
+		if len(lastCategoryTrends) == 0 {
+			return
+		}
+		copyToClipboard(window, formatCategoryTrends(lastCategoryTrends))
+	})
+	categoryJSON := widget.NewButtonWithIcon("Export JSON", theme.DocumentIcon(), func() {
+		if len(lastCategoryTrends) == 0 {
+			return
+		}
+		exportJSON(window, "categories.json", lastCategoryTrends)
+	})
+	categoryCSV := widget.NewButtonWithIcon("Export CSV", theme.DocumentIcon(), func() {
+		if len(lastCategoryTrends) == 0 {
+			return
+		}
+		exportCategoryCSV(window, lastCategoryTrends)
+	})
+	categoryControls.Objects = []fyne.CanvasObject{categoryCopy, categoryJSON, categoryCSV}
+
+	bestsellerControls := container.NewHBox()
+	bestsellerControls.Hide()
+	bestsellerCopy := widget.NewButtonWithIcon("Copy", theme.ContentCopyIcon(), func() {
+		if len(lastBestsellers) == 0 {
+			return
+		}
+		copyToClipboard(window, formatBestsellerProducts(lastBestsellers))
+	})
+	bestsellerJSON := widget.NewButtonWithIcon("Export JSON", theme.DocumentIcon(), func() {
+		if len(lastBestsellers) == 0 {
+			return
+		}
+		exportJSON(window, "bestsellers.json", lastBestsellers)
+	})
+	bestsellerCSV := widget.NewButtonWithIcon("Export CSV", theme.DocumentIcon(), func() {
+		if len(lastBestsellers) == 0 {
+			return
+		}
+		exportBestsellerCSV(window, lastBestsellers)
+	})
+	bestsellerControls.Objects = []fyne.CanvasObject{bestsellerCopy, bestsellerJSON, bestsellerCSV}
+
+	keywordInfoAction := newInfoButton("Generates keyword ideas with volume, competition and relevancy scores from Amazon auto-complete data.")
+	categoryInfoAction := newInfoButton("Highlights categories where the seed term is trending so you can position listings effectively.")
+	bestsellerInfoAction := newInfoButton("Summarises top selling books for the keyword to benchmark pricing, reviews and rank metrics.")
+
+	keywordInfoHeader := newInfoButton("Generates keyword ideas with volume, competition and relevancy scores from Amazon auto-complete data.")
+	categoryInfoHeader := newInfoButton("Highlights categories where the seed term is trending so you can position listings effectively.")
+	bestsellerInfoHeader := newInfoButton("Summarises top selling books for the keyword to benchmark pricing, reviews and rank metrics.")
+
 	fetchKeywords := func() {
 		seed := strings.TrimSpace(keywordEntry.Text)
 		country := strings.TrimSpace(countrySelect.Selected)
@@ -232,6 +397,9 @@ func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, count
 			return
 		}
 
+		activity.Start()
+		quota.Use()
+
 		progress := dialog.NewProgressInfinite("Keyword Research", fmt.Sprintf("Collecting ideas for \"%s\"…", seed), window)
 		progress.Show()
 
@@ -242,13 +410,22 @@ func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, count
 			insights, err := service.KeywordSuggestions(ctx, seed, country, filters)
 
 			queueOnMain(window, func() {
+				activity.Done()
 				progress.Hide()
 				if err != nil {
 					dialog.ShowError(err, window)
 					safeSet(keywordResult, fmt.Sprintf("Unable to fetch keyword suggestions: %v", err))
+					lastKeywordInsights = nil
+					keywordControls.Hide()
+					keywordChart.Objects = []fyne.CanvasObject{widget.NewLabel("No keyword suggestions available yet.")}
+					keywordChart.Refresh()
 					return
 				}
+				lastKeywordInsights = insights
+				keywordControls.Show()
+				keywordControls.Refresh()
 				safeSet(keywordResult, formatKeywordInsights(insights))
+				updateKeywordChart(keywordChart, insights)
 			})
 		}()
 	}
@@ -265,6 +442,9 @@ func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, count
 			return
 		}
 
+		activity.Start()
+		quota.Use()
+
 		progress := dialog.NewProgressInfinite("Category Insights", "Discovering high performing categories…", window)
 		progress.Show()
 
@@ -275,12 +455,18 @@ func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, count
 			trends, err := service.FetchCategoryTrends(ctx, seed, country)
 
 			queueOnMain(window, func() {
+				activity.Done()
 				progress.Hide()
 				if err != nil {
 					dialog.ShowError(err, window)
 					safeSet(categoryResult, fmt.Sprintf("Unable to fetch category insights: %v", err))
+					lastCategoryTrends = nil
+					categoryControls.Hide()
 					return
 				}
+				lastCategoryTrends = trends
+				categoryControls.Show()
+				categoryControls.Refresh()
 				safeSet(categoryResult, formatCategoryTrends(trends))
 			})
 		}()
@@ -304,6 +490,9 @@ func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, count
 			return
 		}
 
+		activity.Start()
+		quota.Use()
+
 		progress := dialog.NewProgressInfinite("Bestseller Snapshot", fmt.Sprintf("Reviewing top results for \"%s\"…", seed), window)
 		progress.Show()
 
@@ -314,53 +503,86 @@ func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, count
 			products, err := service.BestsellerAnalysis(ctx, seed, country, filter)
 
 			queueOnMain(window, func() {
+				activity.Done()
 				progress.Hide()
 				if err != nil {
 					dialog.ShowError(err, window)
 					safeSet(bestsellerResult, fmt.Sprintf("Unable to analyse bestsellers: %v", err))
+					lastBestsellers = nil
+					bestsellerControls.Hide()
 					return
 				}
+				lastBestsellers = products
+				bestsellerControls.Show()
+				bestsellerControls.Refresh()
 				safeSet(bestsellerResult, formatBestsellerProducts(products))
 			})
 		}()
 	}
 
-	keywordActions := container.NewHBox(
-		widget.NewButton("Fetch Keyword Suggestions", fetchKeywords),
-		widget.NewButton("Category Insights", fetchCategories),
-		widget.NewButton("Bestseller Snapshot", fetchBestsellers),
+	keywordButton := widget.NewButton("Fetch Keyword Suggestions", fetchKeywords)
+	categoryButton := widget.NewButton("Category Insights", fetchCategories)
+	bestsellerButton := widget.NewButton("Bestseller Snapshot", fetchBestsellers)
+
+	actionGrid := container.NewGridWithColumns(3,
+		container.NewHBox(keywordButton, keywordInfoAction),
+		container.NewHBox(categoryButton, categoryInfoAction),
+		container.NewHBox(bestsellerButton, bestsellerInfoAction),
 	)
+
+	advancedFilters := widget.NewAccordion(
+		widget.NewAccordionItem("Keyword Filters", container.NewVBox(
+			widget.NewLabel("Fine-tune search suggestions"),
+			container.NewGridWithColumns(3, minVolumeEntry, maxCompetitionEntry, maxDensityEntry),
+		)),
+		widget.NewAccordionItem("Bestseller Filters", container.NewVBox(
+			widget.NewLabel("Limit bestseller results"),
+			container.NewGridWithColumns(2, maxRankEntry, indieOnlyCheck),
+		)),
+	)
+	advancedFilters.MultiOpen = true
 
 	keywordOutputs := newResultScroll(container.NewVBox(
-		widget.NewLabelWithStyle("Keyword Suggestions", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		keywordLabel,
+		container.NewVBox(
+			container.NewHBox(widget.NewLabelWithStyle("Keyword Suggestions", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), layout.NewSpacer(), keywordInfoHeader),
+			keywordControls,
+			keywordChart,
+			widget.NewSeparator(),
+			keywordLabel,
+		),
 		widget.NewSeparator(),
-		widget.NewLabelWithStyle("Category Intelligence", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		categoryLabel,
+		container.NewVBox(
+			container.NewHBox(widget.NewLabelWithStyle("Category Intelligence", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), layout.NewSpacer(), categoryInfoHeader),
+			categoryControls,
+			categoryLabel,
+		),
 		widget.NewSeparator(),
-		widget.NewLabelWithStyle("Bestseller Analysis", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		bestsellerLabel,
+		container.NewVBox(
+			container.NewHBox(widget.NewLabelWithStyle("Bestseller Analysis", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), layout.NewSpacer(), bestsellerInfoHeader),
+			bestsellerControls,
+			bestsellerLabel,
+		),
 	))
 
-	filtersForm := widget.NewForm(
-		widget.NewFormItem("Min Search Volume", minVolumeEntry),
-		widget.NewFormItem("Max Competition", maxCompetitionEntry),
-		widget.NewFormItem("Max Title Density", maxDensityEntry),
-		widget.NewFormItem("Max BSR", maxRankEntry),
-		widget.NewFormItem("Filters", indieOnlyCheck),
+	form := widget.NewForm(
+		widget.NewFormItem("Seed Keyword", keywordEntry),
+		widget.NewFormItem("Marketplace", countrySelect),
 	)
+	form.SubmitText = "Fetch Suggestions"
+	form.OnSubmit = fetchKeywords
 
-	return container.NewBorder(filtersForm, nil, nil, nil, container.NewVBox(
+	return container.NewVBox(
 		widget.NewLabelWithStyle("Keyword Research Toolkit", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		keywordEntry,
-		countrySelect,
-		keywordActions,
-		layout.NewSpacer(),
+		form,
+		advancedFilters,
+		widget.NewSeparator(),
+		actionGrid,
+		widget.NewSeparator(),
 		keywordOutputs,
-	))
+	)
 }
 
-func buildCompetitiveTab(window fyne.Window, service *scraper.Service, countries []string, reverseResult, campaignResult binding.String) fyne.CanvasObject {
+func buildCompetitiveTab(window fyne.Window, service *scraper.Service, countries []string, reverseResult, campaignResult binding.String, activity *serviceActivity, quota *quotaTracker) fyne.CanvasObject {
 	asinEntry := widget.NewEntry()
 	asinEntry.SetPlaceHolder("B0C1234XYZ")
 
@@ -388,6 +610,53 @@ func buildCompetitiveTab(window fyne.Window, service *scraper.Service, countries
 	campaignLabel := widget.NewLabelWithData(campaignResult)
 	campaignLabel.Wrapping = fyne.TextWrapWord
 
+	var lastReverseInsights []scraper.KeywordInsight
+	var lastCampaignKeywords []string
+
+	reverseControls := container.NewHBox()
+	reverseControls.Hide()
+	reverseCopy := widget.NewButtonWithIcon("Copy", theme.ContentCopyIcon(), func() {
+		if len(lastReverseInsights) == 0 {
+			return
+		}
+		copyToClipboard(window, formatKeywordInsights(lastReverseInsights))
+	})
+	reverseJSON := widget.NewButtonWithIcon("Export JSON", theme.DocumentIcon(), func() {
+		if len(lastReverseInsights) == 0 {
+			return
+		}
+		exportJSON(window, "reverse-asin.json", lastReverseInsights)
+	})
+	reverseCSV := widget.NewButtonWithIcon("Export CSV", theme.DocumentIcon(), func() {
+		if len(lastReverseInsights) == 0 {
+			return
+		}
+		exportKeywordCSV(window, lastReverseInsights)
+	})
+	reverseControls.Objects = []fyne.CanvasObject{reverseCopy, reverseJSON, reverseCSV}
+
+	campaignControls := container.NewHBox()
+	campaignControls.Hide()
+	campaignCopy := widget.NewButtonWithIcon("Copy", theme.ContentCopyIcon(), func() {
+		if len(lastCampaignKeywords) == 0 {
+			return
+		}
+		copyToClipboard(window, formatCampaignKeywords(lastCampaignKeywords))
+	})
+	campaignJSON := widget.NewButtonWithIcon("Export JSON", theme.DocumentIcon(), func() {
+		if len(lastCampaignKeywords) == 0 {
+			return
+		}
+		exportJSON(window, "campaign-keywords.json", lastCampaignKeywords)
+	})
+	campaignCSV := widget.NewButtonWithIcon("Export CSV", theme.DocumentIcon(), func() {
+		if len(lastCampaignKeywords) == 0 {
+			return
+		}
+		exportCampaignCSV(window, lastCampaignKeywords)
+	})
+	campaignControls.Objects = []fyne.CanvasObject{campaignCopy, campaignJSON, campaignCSV}
+
 	reverseButton := widget.NewButton("Run Reverse ASIN", func() {
 		asin := strings.TrimSpace(asinEntry.Text)
 		country := strings.TrimSpace(countrySelect.Selected)
@@ -406,6 +675,9 @@ func buildCompetitiveTab(window fyne.Window, service *scraper.Service, countries
 			return
 		}
 
+		activity.Start()
+		quota.Use()
+
 		progress := dialog.NewProgressInfinite("Reverse ASIN", fmt.Sprintf("Investigating %s…", strings.ToUpper(asin)), window)
 		progress.Show()
 
@@ -416,12 +688,18 @@ func buildCompetitiveTab(window fyne.Window, service *scraper.Service, countries
 			insights, err := service.ReverseASINSearch(ctx, asin, country, filters)
 
 			queueOnMain(window, func() {
+				activity.Done()
 				progress.Hide()
 				if err != nil {
 					dialog.ShowError(err, window)
 					safeSet(reverseResult, fmt.Sprintf("Unable to run reverse ASIN: %v", err))
+					lastReverseInsights = nil
+					reverseControls.Hide()
 					return
 				}
+				lastReverseInsights = insights
+				reverseControls.Show()
+				reverseControls.Refresh()
 				safeSet(reverseResult, formatKeywordInsights(insights))
 			})
 		}()
@@ -440,6 +718,9 @@ func buildCompetitiveTab(window fyne.Window, service *scraper.Service, countries
 			return
 		}
 
+		activity.Start()
+		quota.Use()
+
 		progress := dialog.NewProgressInfinite("Campaign Builder", "Composing Amazon Ads keyword list…", window)
 		progress.Show()
 
@@ -450,12 +731,18 @@ func buildCompetitiveTab(window fyne.Window, service *scraper.Service, countries
 			keywords, err := service.GenerateAMSKeywords(ctx, titleEntry.Text, descriptionEntry.Text, competitors, country)
 
 			queueOnMain(window, func() {
+				activity.Done()
 				progress.Hide()
 				if err != nil {
 					dialog.ShowError(err, window)
 					safeSet(campaignResult, fmt.Sprintf("Unable to generate campaign keywords: %v", err))
+					lastCampaignKeywords = nil
+					campaignControls.Hide()
 					return
 				}
+				lastCampaignKeywords = keywords
+				campaignControls.Show()
+				campaignControls.Refresh()
 				safeSet(campaignResult, formatCampaignKeywords(keywords))
 			})
 		}()
@@ -467,6 +754,7 @@ func buildCompetitiveTab(window fyne.Window, service *scraper.Service, countries
 		container.NewGridWithColumns(3, minVolumeEntry, maxCompetitionEntry, maxDensityEntry),
 		reverseButton,
 		widget.NewSeparator(),
+		reverseControls,
 		newResultScroll(container.NewPadded(reverseLabel)),
 	)
 
@@ -477,6 +765,7 @@ func buildCompetitiveTab(window fyne.Window, service *scraper.Service, countries
 		competitorEntry,
 		campaignButton,
 		widget.NewSeparator(),
+		campaignControls,
 		newResultScroll(container.NewPadded(campaignLabel)),
 	)
 
@@ -487,7 +776,7 @@ func buildCompetitiveTab(window fyne.Window, service *scraper.Service, countries
 	return container.NewBorder(sidebar, nil, nil, nil, container.NewVBox(reverseSection, widget.NewSeparator(), campaignSection))
 }
 
-func buildInternationalTab(window fyne.Window, service *scraper.Service, countries []string, result binding.String) fyne.CanvasObject {
+func buildInternationalTab(window fyne.Window, service *scraper.Service, countries []string, result binding.String, activity *serviceActivity, quota *quotaTracker) fyne.CanvasObject {
 	keywordEntry := widget.NewEntry()
 	keywordEntry.SetPlaceHolder("mindfulness journal")
 
@@ -499,6 +788,30 @@ func buildInternationalTab(window fyne.Window, service *scraper.Service, countri
 
 	resultLabel := widget.NewLabelWithData(result)
 	resultLabel.Wrapping = fyne.TextWrapWord
+
+	var lastInternational []scraper.InternationalKeyword
+
+	resultControls := container.NewHBox()
+	resultControls.Hide()
+	copyButton := widget.NewButtonWithIcon("Copy", theme.ContentCopyIcon(), func() {
+		if len(lastInternational) == 0 {
+			return
+		}
+		copyToClipboard(window, formatInternationalKeywords(lastInternational))
+	})
+	jsonButton := widget.NewButtonWithIcon("Export JSON", theme.DocumentIcon(), func() {
+		if len(lastInternational) == 0 {
+			return
+		}
+		exportJSON(window, "international-keywords.json", lastInternational)
+	})
+	csvButton := widget.NewButtonWithIcon("Export CSV", theme.DocumentIcon(), func() {
+		if len(lastInternational) == 0 {
+			return
+		}
+		exportInternationalCSV(window, lastInternational)
+	})
+	resultControls.Objects = []fyne.CanvasObject{copyButton, jsonButton, csvButton}
 
 	fetch := func() {
 		keyword := strings.TrimSpace(keywordEntry.Text)
@@ -513,6 +826,9 @@ func buildInternationalTab(window fyne.Window, service *scraper.Service, countri
 			return
 		}
 
+		activity.Start()
+		quota.Use()
+
 		progress := dialog.NewProgressInfinite("International Research", "Localising your keyword list…", window)
 		progress.Show()
 
@@ -523,12 +839,18 @@ func buildInternationalTab(window fyne.Window, service *scraper.Service, countri
 			keywords, err := service.InternationalKeywords(ctx, keyword, selected)
 
 			queueOnMain(window, func() {
+				activity.Done()
 				progress.Hide()
 				if err != nil {
 					dialog.ShowError(err, window)
 					safeSet(result, fmt.Sprintf("Unable to fetch international keywords: %v", err))
+					lastInternational = nil
+					resultControls.Hide()
 					return
 				}
+				lastInternational = keywords
+				resultControls.Show()
+				resultControls.Refresh()
 				safeSet(result, formatInternationalKeywords(keywords))
 			})
 		}()
@@ -540,8 +862,385 @@ func buildInternationalTab(window fyne.Window, service *scraper.Service, countri
 		countryGroup,
 		widget.NewButton("Generate Suggestions", fetch),
 		widget.NewSeparator(),
+		resultControls,
 		newResultScroll(container.NewPadded(resultLabel)),
 	)
+}
+
+func updateProductCards(target *fyne.Container, summary *widget.Label, details *scraper.ProductDetails) {
+	if target == nil {
+		return
+	}
+
+	target.Objects = nil
+	if details == nil {
+		if summary != nil {
+			target.Add(summary)
+		}
+		target.Refresh()
+		return
+	}
+
+	cards := buildProductCards(details)
+	if len(cards) > 0 {
+		target.Add(container.NewGridWithColumns(2, cards...))
+	}
+	if summary != nil {
+		target.Add(widget.NewSeparator())
+		target.Add(summary)
+	}
+	target.Refresh()
+}
+
+func buildProductCards(details *scraper.ProductDetails) []fyne.CanvasObject {
+	if details == nil {
+		return nil
+	}
+
+	buildRows := func(values ...string) []fyne.CanvasObject {
+		rows := make([]fyne.CanvasObject, 0, len(values))
+		for _, value := range values {
+			if strings.TrimSpace(value) == "" {
+				continue
+			}
+			rows = append(rows, widget.NewLabel(value))
+		}
+		return rows
+	}
+
+	title := fallback(details.Title, "Unknown Title")
+	asin := strings.ToUpper(fallback(details.ASIN, "N/A"))
+
+	overviewContent := container.NewVBox(buildRows(
+		fmt.Sprintf("Brand: %s", fallback(details.Brand, "Unknown")),
+		fmt.Sprintf("Availability: %s", fallback(details.Availability, "Unknown")),
+		fmt.Sprintf("Publisher: %s", fallback(details.Publisher, "Unknown")),
+		fmt.Sprintf("Delivery: %s", fallback(details.DeliveryMessage, "Not specified")),
+		fmt.Sprintf("Listing URL: %s", fallback(details.URL, "Unavailable")),
+	)...)
+
+	currencyPrice := strings.TrimSpace(strings.TrimSpace(details.Currency + " " + details.Price))
+	pricingContent := container.NewVBox(buildRows(
+		fmt.Sprintf("Price: %s", fallback(currencyPrice, "Not available")),
+		fmt.Sprintf("Rating: %s", fallback(details.Rating, "Unknown")),
+		fmt.Sprintf("Reviews: %s", fallback(details.ReviewCount, "Unknown")),
+		fmt.Sprintf("Title Density: %s", formatFloat(details.TitleDensity)),
+		fmt.Sprintf("Independent Publisher: %s", boolToString(details.IsIndependent)),
+	)...)
+
+	specsContent := container.NewVBox(buildRows(
+		fmt.Sprintf("Publication Date: %s", fallback(details.PublicationDate, "Unknown")),
+		fmt.Sprintf("Print Length: %s", fallback(details.PrintLength, "Unknown")),
+		fmt.Sprintf("Dimensions: %s", fallback(details.Dimensions, "Unknown")),
+		fmt.Sprintf("Language: %s", fallback(details.Language, "Unknown")),
+		fmt.Sprintf("ISBN-10: %s", fallback(details.ISBN10, "N/A")),
+		fmt.Sprintf("ISBN-13: %s", fallback(details.ISBN13, "N/A")),
+	)...)
+
+	cards := []fyne.CanvasObject{
+		widget.NewCard("Listing Snapshot", fmt.Sprintf("ASIN %s", asin), overviewContent),
+		widget.NewCard("Pricing & Reviews", title, pricingContent),
+		widget.NewCard("Product Specs", "Key attributes", specsContent),
+	}
+
+	if len(details.BestSellerRanks) > 0 {
+		ranksContent := container.NewVBox()
+		sorted := append([]scraper.BestSellerRank(nil), details.BestSellerRanks...)
+		sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].Rank < sorted[j].Rank })
+		for _, rank := range sorted {
+			ranksContent.Add(widget.NewLabel(fmt.Sprintf("#%d in %s", rank.Rank, rank.Category)))
+		}
+		cards = append(cards, widget.NewCard("Bestseller Signals", "Top category placements", ranksContent))
+	}
+
+	return cards
+}
+
+func updateKeywordChart(chart *fyne.Container, insights []scraper.KeywordInsight) {
+	if chart == nil {
+		return
+	}
+
+	chart.Objects = nil
+	if len(insights) == 0 {
+		chart.Add(widget.NewLabel("No keyword suggestions available yet."))
+		chart.Refresh()
+		return
+	}
+
+	cloned := append([]scraper.KeywordInsight(nil), insights...)
+	sort.SliceStable(cloned, func(i, j int) bool {
+		if cloned[i].SearchVolume == cloned[j].SearchVolume {
+			return cloned[i].Keyword < cloned[j].Keyword
+		}
+		return cloned[i].SearchVolume > cloned[j].SearchVolume
+	})
+
+	limit := len(cloned)
+	if limit > 15 {
+		limit = 15
+	}
+	maxVolume := cloned[0].SearchVolume
+	if maxVolume <= 0 {
+		maxVolume = 1
+	}
+
+	baseWidth := float32(280)
+	for index := 0; index < limit; index++ {
+		insight := cloned[index]
+		ratio := float32(insight.SearchVolume) / float32(maxVolume)
+		width := baseWidth * ratio
+		if width < 6 {
+			width = 6
+		}
+
+		bar := canvas.NewRectangle(theme.PrimaryColor())
+		bar.SetMinSize(fyne.NewSize(width, 12))
+		bar.CornerRadius = 6
+
+		background := canvas.NewRectangle(theme.DisabledColor())
+		background.SetMinSize(fyne.NewSize(baseWidth, 12))
+		background.CornerRadius = 6
+
+		chart.Add(container.NewVBox(
+			container.NewHBox(
+				widget.NewLabel(fmt.Sprintf("%d. %s", index+1, insight.Keyword)),
+				layout.NewSpacer(),
+				widget.NewLabel(fmt.Sprintf("%d", insight.SearchVolume)),
+			),
+			container.NewMax(background, bar),
+			widget.NewLabel(fmt.Sprintf("Competition %.2f • Relevancy %.2f • Title Density %.2f", insight.CompetitionScore, insight.RelevancyScore, insight.TitleDensity)),
+		))
+	}
+	chart.Refresh()
+}
+
+func newInfoButton(tooltip string) *widget.Button {
+	button := widget.NewButtonWithIcon("", theme.InfoIcon(), func() {})
+	button.Importance = widget.LowImportance
+	button.SetTooltip(tooltip)
+	return button
+}
+
+func copyToClipboard(window fyne.Window, content string) {
+	if window == nil {
+		return
+	}
+	trimmed := strings.TrimSpace(content)
+	if trimmed == "" {
+		return
+	}
+	if clip := window.Clipboard(); clip != nil {
+		clip.SetContent(trimmed)
+	}
+}
+
+func exportJSON(window fyne.Window, fileName string, data interface{}) {
+	if window == nil || data == nil {
+		return
+	}
+
+	saveDialog := dialog.NewFileSave(func(writer fyne.URIWriteCloser, err error) {
+		if err != nil {
+			dialog.ShowError(err, window)
+			return
+		}
+		if writer == nil {
+			return
+		}
+		defer writer.Close()
+
+		encoder := json.NewEncoder(writer)
+		encoder.SetIndent("", "  ")
+		if err := encoder.Encode(data); err != nil {
+			dialog.ShowError(fmt.Errorf("failed to export JSON: %w", err), window)
+		}
+	}, window)
+	saveDialog.SetFileName(fileName)
+	saveDialog.SetFilter(storage.NewExtensionFileFilter([]string{".json"}))
+	saveDialog.Show()
+}
+
+func exportCSV(window fyne.Window, fileName string, headers []string, rows [][]string) {
+	if window == nil || len(rows) == 0 {
+		return
+	}
+
+	saveDialog := dialog.NewFileSave(func(writer fyne.URIWriteCloser, err error) {
+		if err != nil {
+			dialog.ShowError(err, window)
+			return
+		}
+		if writer == nil {
+			return
+		}
+		defer writer.Close()
+
+		csvWriter := csv.NewWriter(writer)
+		if len(headers) > 0 {
+			if err := csvWriter.Write(headers); err != nil {
+				dialog.ShowError(fmt.Errorf("failed to write CSV header: %w", err), window)
+				return
+			}
+		}
+		for _, row := range rows {
+			if err := csvWriter.Write(row); err != nil {
+				dialog.ShowError(fmt.Errorf("failed to write CSV row: %w", err), window)
+				return
+			}
+		}
+		csvWriter.Flush()
+		if err := csvWriter.Error(); err != nil {
+			dialog.ShowError(fmt.Errorf("failed to finalise CSV: %w", err), window)
+		}
+	}, window)
+	saveDialog.SetFileName(fileName)
+	saveDialog.SetFilter(storage.NewExtensionFileFilter([]string{".csv"}))
+	saveDialog.Show()
+}
+
+func exportProductCSV(window fyne.Window, details *scraper.ProductDetails) {
+	if details == nil {
+		return
+	}
+	ranks := make([]string, 0, len(details.BestSellerRanks))
+	for _, rank := range details.BestSellerRanks {
+		ranks = append(ranks, fmt.Sprintf("#%d in %s", rank.Rank, rank.Category))
+	}
+
+	row := []string{
+		strings.ToUpper(fallback(details.ASIN, "")),
+		fallback(details.Title, ""),
+		fallback(details.Price, ""),
+		fallback(details.Currency, ""),
+		fallback(details.Rating, ""),
+		fallback(details.ReviewCount, ""),
+		fallback(details.Availability, ""),
+		fallback(details.Brand, ""),
+		fallback(details.Publisher, ""),
+		fallback(details.PublicationDate, ""),
+		fallback(details.PrintLength, ""),
+		fallback(details.Dimensions, ""),
+		fallback(details.Language, ""),
+		formatFloat(details.TitleDensity),
+		boolToString(details.IsIndependent),
+		fallback(details.URL, ""),
+		strings.Join(ranks, " | "),
+	}
+
+	exportCSV(window, "product.csv", []string{
+		"ASIN", "Title", "Price", "Currency", "Rating", "ReviewCount", "Availability", "Brand", "Publisher", "PublicationDate", "PrintLength", "Dimensions", "Language", "TitleDensity", "Independent", "URL", "BestsellerRanks",
+	}, [][]string{row})
+}
+
+func exportKeywordCSV(window fyne.Window, insights []scraper.KeywordInsight) {
+	if len(insights) == 0 {
+		return
+	}
+	rows := make([][]string, 0, len(insights))
+	for _, insight := range insights {
+		rows = append(rows, []string{
+			insight.Keyword,
+			strconv.Itoa(insight.SearchVolume),
+			formatFloat(insight.CompetitionScore),
+			formatFloat(insight.RelevancyScore),
+			formatFloat(insight.TitleDensity),
+		})
+	}
+	exportCSV(window, "keywords.csv", []string{"Keyword", "SearchVolume", "Competition", "Relevancy", "TitleDensity"}, rows)
+}
+
+func exportCategoryCSV(window fyne.Window, trends []scraper.CategoryTrend) {
+	if len(trends) == 0 {
+		return
+	}
+	rows := make([][]string, 0, len(trends))
+	for _, trend := range trends {
+		rows = append(rows, []string{
+			trend.Category,
+			strconv.Itoa(trend.Rank),
+			trend.Momentum,
+			trend.Notes,
+		})
+	}
+	exportCSV(window, "categories.csv", []string{"Category", "Rank", "Momentum", "Notes"}, rows)
+}
+
+func exportBestsellerCSV(window fyne.Window, products []scraper.BestsellerProduct) {
+	if len(products) == 0 {
+		return
+	}
+	rows := make([][]string, 0, len(products))
+	for _, product := range products {
+		rows = append(rows, []string{
+			strconv.Itoa(product.Rank),
+			product.ASIN,
+			product.Title,
+			product.Price,
+			product.Rating,
+			product.ReviewCount,
+			product.Category,
+			strconv.Itoa(product.BestSeller),
+			product.Publisher,
+			formatFloat(product.TitleDensity),
+			boolToString(product.IsIndie),
+			product.URL,
+		})
+	}
+	exportCSV(window, "bestsellers.csv", []string{"Rank", "ASIN", "Title", "Price", "Rating", "Reviews", "Category", "BSR", "Publisher", "TitleDensity", "Independent", "URL"}, rows)
+}
+
+func exportCampaignCSV(window fyne.Window, keywords []string) {
+	if len(keywords) == 0 {
+		return
+	}
+	rows := make([][]string, 0, len(keywords))
+	for index, keyword := range keywords {
+		rows = append(rows, []string{strconv.Itoa(index + 1), keyword})
+	}
+	exportCSV(window, "campaign-keywords.csv", []string{"Position", "Keyword"}, rows)
+}
+
+func exportInternationalCSV(window fyne.Window, keywords []scraper.InternationalKeyword) {
+	if len(keywords) == 0 {
+		return
+	}
+	rows := make([][]string, 0, len(keywords))
+	for _, keyword := range keywords {
+		rows = append(rows, []string{
+			keyword.CountryName,
+			strings.ToUpper(keyword.CountryCode),
+			keyword.Keyword,
+			strconv.Itoa(keyword.SearchVolume),
+		})
+	}
+	exportCSV(window, "international-keywords.csv", []string{"Country", "Code", "Keyword", "SearchVolume"}, rows)
+}
+
+func boolToString(value bool) string {
+	if value {
+		return "Yes"
+	}
+	return "No"
+}
+
+func formatFloat(value float64) string {
+	if value <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("%.2f", value)
+}
+
+func isValidASIN(asin string) bool {
+	if len(asin) != 10 {
+		return false
+	}
+	for _, r := range asin {
+		if (r < 'A' || r > 'Z') && (r < '0' || r > '9') {
+			return false
+		}
+	}
+	return true
 }
 
 func formatProductDetails(details *scraper.ProductDetails) string {
@@ -902,4 +1601,128 @@ func defaultInternationalSelection(countries []string) []string {
 		selection = append(selection, countries[:limit]...)
 	}
 	return selection
+}
+
+type serviceActivity struct {
+	mu      sync.Mutex
+	binding binding.String
+	active  int
+}
+
+func newServiceActivity(binding binding.String) *serviceActivity {
+	return &serviceActivity{binding: binding}
+}
+
+func (s *serviceActivity) Start() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.active++
+	status := "🟡 Running request…"
+	if s.active > 1 {
+		status = fmt.Sprintf("🟡 Running %d requests…", s.active)
+	}
+	if s.binding != nil {
+		_ = s.binding.Set(status)
+	}
+	s.mu.Unlock()
+}
+
+func (s *serviceActivity) Done() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	if s.active > 0 {
+		s.active--
+	}
+	status := "🟢 Service ready"
+	if s.active > 0 {
+		status = fmt.Sprintf("🟡 Running %d request(s)…", s.active)
+	}
+	if s.binding != nil {
+		_ = s.binding.Set(status)
+	}
+	s.mu.Unlock()
+}
+
+type quotaTracker struct {
+	mu        sync.Mutex
+	capacity  int
+	remaining int
+	binding   binding.String
+	ticker    *time.Ticker
+	stop      chan struct{}
+	stopOnce  sync.Once
+}
+
+func newQuotaTracker(capacity int, binding binding.String) *quotaTracker {
+	if capacity <= 0 {
+		capacity = 20
+	}
+	tracker := &quotaTracker{
+		capacity:  capacity,
+		remaining: capacity,
+		binding:   binding,
+		ticker:    time.NewTicker(time.Minute),
+		stop:      make(chan struct{}),
+	}
+	tracker.updateBindingLocked()
+	go tracker.loop()
+	return tracker
+}
+
+func (q *quotaTracker) loop() {
+	if q == nil {
+		return
+	}
+	for {
+		select {
+		case <-q.stop:
+			return
+		case <-q.ticker.C:
+			q.mu.Lock()
+			q.remaining = q.capacity
+			q.updateBindingLocked()
+			q.mu.Unlock()
+		}
+	}
+}
+
+func (q *quotaTracker) Use() {
+	if q == nil {
+		return
+	}
+	q.mu.Lock()
+	if q.remaining > 0 {
+		q.remaining--
+	}
+	q.updateBindingLocked()
+	q.mu.Unlock()
+}
+
+func (q *quotaTracker) Stop() {
+	if q == nil {
+		return
+	}
+	q.stopOnce.Do(func() {
+		if q.ticker != nil {
+			q.ticker.Stop()
+		}
+		if q.stop != nil {
+			close(q.stop)
+		}
+	})
+}
+
+func (q *quotaTracker) updateBindingLocked() {
+	if q == nil || q.binding == nil {
+		return
+	}
+	status := fmt.Sprintf("Quota: %d/%d requests remaining", q.remaining, q.capacity)
+	if q.remaining == 0 {
+		status += " (queuing new requests)"
+	}
+	_ = q.binding.Set(status)
 }
