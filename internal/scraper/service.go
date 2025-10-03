@@ -197,10 +197,13 @@ func (s *Service) FetchProduct(ctx context.Context, asin, country string) (*Prod
 	titleDensity := -1.0
 	if strings.TrimSpace(title) != "" {
 		densityCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
-		density, err := s.computeTitleDensity(densityCtx, title, country)
+		_, exact, err := s.computeTitleMatches(densityCtx, title, country)
 		cancel()
 		if err == nil {
-			titleDensity = math.Round(density*100) / 100
+			titleDensity = float64(exact)
+		} else {
+			_, fallbackExact := estimateTitleMatches(title)
+			titleDensity = float64(fallbackExact)
 		}
 	}
 
@@ -309,11 +312,10 @@ func (s *Service) KeywordSuggestions(ctx context.Context, keyword, country strin
 							}
 							searchVolume := int(math.Max(150.0, 1200.0/(float64(idx)+1)))
 							relevancy := math.Max(0.1, 1.0-(float64(idx)*0.08))
-							competition := math.Max(0.05, 0.4+(float64(len(value))*0.02))
 							insights = append(insights, KeywordInsight{
 								Keyword:          value,
 								SearchVolume:     searchVolume,
-								CompetitionScore: math.Round(competition*100) / 100,
+								CompetitionScore: -1,
 								RelevancyScore:   math.Round(relevancy*100) / 100,
 								TitleDensity:     -1,
 							})
@@ -333,16 +335,27 @@ func (s *Service) KeywordSuggestions(ctx context.Context, keyword, country strin
 		if i >= 10 {
 			break
 		}
-		if insights[i].TitleDensity >= 0 {
-			continue
-		}
-		densityCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		density, err := s.computeTitleDensity(densityCtx, insights[i].Keyword, country)
+		matchCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		containing, exact, err := s.computeTitleMatches(matchCtx, insights[i].Keyword, country)
 		cancel()
 		if err != nil {
 			continue
 		}
-		insights[i].TitleDensity = math.Round(density*100) / 100
+		insights[i].CompetitionScore = float64(containing)
+		insights[i].TitleDensity = float64(exact)
+	}
+
+	for i := range insights {
+		if insights[i].CompetitionScore >= 0 && insights[i].TitleDensity >= 0 {
+			continue
+		}
+		contain, exact := estimateTitleMatches(insights[i].Keyword)
+		if insights[i].CompetitionScore < 0 {
+			insights[i].CompetitionScore = float64(contain)
+		}
+		if insights[i].TitleDensity < 0 {
+			insights[i].TitleDensity = float64(exact)
+		}
 	}
 
 	insights = filterKeywordInsights(insights, filters)
@@ -487,18 +500,15 @@ func (s *Service) BestsellerAnalysis(ctx context.Context, keyword, country, alia
 	}
 
 	products := []BestsellerProduct{}
-	keywordLower := strings.ToLower(keyword)
-	totalResults := 0
-	densityMatches := 0
+	exactMatches := 0
 
 	doc.Find("div.s-main-slot div[data-component-type='s-search-result']").EachWithBreak(func(i int, selection *goquery.Selection) bool {
 		title := strings.TrimSpace(selection.Find("h2 span").Text())
 		if title == "" {
 			return true
 		}
-		totalResults++
-		if strings.Contains(strings.ToLower(title), keywordLower) {
-			densityMatches++
+		if strings.EqualFold(strings.TrimSpace(title), keyword) {
+			exactMatches++
 		}
 		price := firstNonEmpty(
 			strings.TrimSpace(selection.Find("span.a-price span.a-offscreen").First().Text()),
@@ -536,13 +546,8 @@ func (s *Service) BestsellerAnalysis(ctx context.Context, keyword, country, alia
 		products = synthesizeBestsellers(keyword, country)
 	}
 
-	baseDensity := 0.0
-	if totalResults > 0 {
-		baseDensity = float64(densityMatches) / float64(totalResults)
-	}
-
 	for i := range products {
-		products[i].TitleDensity = math.Round(baseDensity*100) / 100
+		products[i].TitleDensity = float64(exactMatches)
 		if products[i].ASIN == "" || i >= 5 {
 			continue
 		}
@@ -601,7 +606,8 @@ func (s *Service) ReverseASINSearch(ctx context.Context, asin, country string, f
 	}
 
 	if len(insights) == 0 {
-		return []KeywordInsight{{Keyword: product.Title, SearchVolume: 500, CompetitionScore: 0.5, RelevancyScore: 0.9, TitleDensity: product.TitleDensity}}, nil
+		contain, exact := estimateTitleMatches(product.Title)
+		return []KeywordInsight{{Keyword: product.Title, SearchVolume: 500, CompetitionScore: float64(contain), RelevancyScore: 0.9, TitleDensity: math.Max(product.TitleDensity, float64(exact))}}, nil
 	}
 
 	return insights, nil
@@ -681,7 +687,7 @@ func (s *Service) GenerateAMSKeywords(ctx context.Context, title, description st
 			continue
 		}
 		best := insights[0]
-		score := float64(weight)*1.2 + float64(best.SearchVolume)/100 - best.CompetitionScore*10
+		score := float64(weight)*1.2 + float64(best.SearchVolume)/100 - best.CompetitionScore
 		scored = append(scored, scoredKeyword{keyword: best.Keyword, score: score})
 	}
 
@@ -774,9 +780,18 @@ func FlagIllegalKeywords(keywords []string) []string {
 }
 
 func (s *Service) computeTitleDensity(ctx context.Context, keyword, country string) (float64, error) {
+	_, exact, err := s.computeTitleMatches(ctx, keyword, country)
+	if err != nil {
+		return 0, err
+	}
+
+	return float64(exact), nil
+}
+
+func (s *Service) computeTitleMatches(ctx context.Context, keyword, country string) (int, int, error) {
 	keyword = strings.TrimSpace(keyword)
 	if keyword == "" {
-		return 0, errors.New("keyword is required")
+		return 0, 0, errors.New("keyword is required")
 	}
 
 	cfg := ConfigFor(strings.ToUpper(country))
@@ -787,43 +802,49 @@ func (s *Service) computeTitleDensity(ctx context.Context, keyword, country stri
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+"?"+params.Encode(), nil)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	req.Header.Set("User-Agent", s.userAgent())
 	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
 
 	if err := s.waitForRate(ctx); err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return 0, err
+			return 0, 0, err
 		}
 		logging.Logger().Warn("rate limiter interrupted title density computation, using heuristic", "keyword", keyword, "country", country, "error", err)
-		return estimateTitleDensity(keyword), nil
+		contain, exact := estimateTitleMatches(keyword)
+		return contain, exact, nil
 	}
 
 	resp, err := s.client.Do(req)
 	if err != nil {
 		logging.Logger().Warn("title density request failed, using heuristic", "keyword", keyword, "country", country, "error", err)
-		return estimateTitleDensity(keyword), nil
+		contain, exact := estimateTitleMatches(keyword)
+		return contain, exact, nil
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		logging.Logger().Warn("title density request returned non-OK status", "keyword", keyword, "country", country, "status", resp.StatusCode)
-		return estimateTitleDensity(keyword), nil
+		contain, exact := estimateTitleMatches(keyword)
+		return contain, exact, nil
 	}
 
 	doc, err := goquery.NewDocumentFromReader(resp.Body)
 	if err != nil {
 		logging.Logger().Warn("unable to parse title density page, using heuristic", "keyword", keyword, "country", country, "error", err)
-		return estimateTitleDensity(keyword), nil
+		contain, exact := estimateTitleMatches(keyword)
+		return contain, exact, nil
 	}
 	if err := detectBotChallenge(doc); err != nil {
 		logging.Logger().Warn("bot challenge detected during title density computation", "keyword", keyword, "country", country, "error", err)
-		return estimateTitleDensity(keyword), nil
+		contain, exact := estimateTitleMatches(keyword)
+		return contain, exact, nil
 	}
 
 	total := 0
-	matches := 0
+	containing := 0
+	exact := 0
 	needle := strings.ToLower(keyword)
 	doc.Find("div.s-main-slot div[data-component-type='s-search-result']").EachWithBreak(func(i int, selection *goquery.Selection) bool {
 		if total >= 10 {
@@ -834,17 +855,17 @@ func (s *Service) computeTitleDensity(ctx context.Context, keyword, country stri
 			return true
 		}
 		total++
-		if strings.Contains(strings.ToLower(title), needle) {
-			matches++
+		lowered := strings.ToLower(title)
+		if strings.Contains(lowered, needle) {
+			containing++
+		}
+		if strings.EqualFold(strings.TrimSpace(title), keyword) {
+			exact++
 		}
 		return total < 10
 	})
 
-	if total == 0 {
-		return 0, nil
-	}
-
-	return float64(matches) / float64(total), nil
+	return containing, exact, nil
 }
 
 func parsePublisher(doc *goquery.Document) string {
@@ -1143,14 +1164,27 @@ func applyBestsellerFilters(products []BestsellerProduct, filter BestsellerFilte
 	return filtered
 }
 
-func estimateTitleDensity(keyword string) float64 {
+func estimateTitleMatches(keyword string) (int, int) {
 	keyword = strings.TrimSpace(strings.ToLower(keyword))
 	if keyword == "" {
-		return 0.3
+		return 4, 1
 	}
 
-	estimate := 0.22 + stableFloat("density-estimate-"+keyword)*0.5
-	return math.Round(estimate*100) / 100
+	baseline := 0.22 + stableFloat("density-estimate-"+keyword)*0.5
+	contain := int(math.Round(baseline * 10))
+	if contain < 0 {
+		contain = 0
+	} else if contain > 10 {
+		contain = 10
+	}
+
+	exactBaseline := stableFloat("density-exact-" + keyword)
+	exact := int(math.Round(float64(contain) * (0.15 + exactBaseline*0.35)))
+	if exact > contain {
+		exact = contain
+	}
+
+	return contain, exact
 }
 
 // helper functions ---------------------------------------------------------
