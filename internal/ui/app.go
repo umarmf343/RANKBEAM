@@ -938,7 +938,13 @@ func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, count
 		keywordOutputs,
 	)
 
-	split = container.NewHSplit(container.NewPadded(presetSidebar), container.NewPadded(mainContent))
+	presetScroll := container.NewVScroll(container.NewPadded(presetSidebar))
+	presetScroll.SetMinSize(fyne.NewSize(260, 0))
+
+	mainScroll := container.NewVScroll(container.NewPadded(mainContent))
+	mainScroll.SetMinSize(fyne.NewSize(0, 0))
+
+	split = container.NewHSplit(presetScroll, mainScroll)
 	split.SetOffset(presetDefaultOffset)
 
 	return split
@@ -1677,7 +1683,8 @@ func resolveWindow(window fyne.Window) fyne.Window {
 }
 
 func showThrottleSettingsDialog(window fyne.Window) {
-	if window == nil {
+	win := resolveWindow(window)
+	if win == nil {
 		return
 	}
 
@@ -1688,54 +1695,72 @@ func showThrottleSettingsDialog(window fyne.Window) {
 
 	timeoutEntry := widget.NewEntry()
 	timeoutEntry.SetText(strconv.Itoa(int(current.Timeout / time.Second)))
-	timeoutEntry.Validator = func(text string) error {
-		text = strings.TrimSpace(text)
-		if text == "" {
-			return errors.New("request timeout is required")
-		}
-		value, err := strconv.Atoi(text)
-		if err != nil || value <= 0 {
-			return errors.New("enter a positive timeout in seconds")
-		}
-		return nil
-	}
 
 	concurrencyEntry := widget.NewEntry()
 	concurrencyEntry.SetText(strconv.Itoa(current.RequestsPerMinute))
-	concurrencyEntry.Validator = func(text string) error {
-		text = strings.TrimSpace(text)
-		if text == "" {
-			return errors.New("requests per minute is required")
-		}
-		value, err := strconv.Atoi(text)
-		if err != nil || value <= 0 {
-			return errors.New("enter a positive number of requests per minute")
-		}
-		return nil
-	}
 
-	formItems := []*widget.FormItem{
+	errorLabel := widget.NewLabel("")
+	errorLabel.Hide()
+	errorLabel.Wrapping = fyne.TextWrapWord
+	errorLabel.TextStyle = fyne.TextStyle{Italic: true}
+	errorLabel.Importance = widget.DangerImportance
+
+	form := widget.NewForm(
 		widget.NewFormItem("", info),
 		widget.NewFormItem("Request timeout (seconds)", timeoutEntry),
 		widget.NewFormItem("Requests per minute", concurrencyEntry),
+	)
+
+	validateInputs := func() (int, int, error) {
+		timeoutText := strings.TrimSpace(timeoutEntry.Text)
+		if timeoutText == "" {
+			return 0, 0, errors.New("request timeout is required")
+		}
+		timeoutSeconds, err := strconv.Atoi(timeoutText)
+		if err != nil || timeoutSeconds <= 0 {
+			return 0, 0, errors.New("enter a positive timeout in seconds")
+		}
+
+		rpmText := strings.TrimSpace(concurrencyEntry.Text)
+		if rpmText == "" {
+			return 0, 0, errors.New("requests per minute is required")
+		}
+		requestsPerMinute, err := strconv.Atoi(rpmText)
+		if err != nil || requestsPerMinute <= 0 {
+			return 0, 0, errors.New("enter a positive number of requests per minute")
+		}
+
+		return timeoutSeconds, requestsPerMinute, nil
 	}
 
-	dialog := dialog.NewForm("Request Settings", "Save", "Cancel", formItems, func(ok bool) {
+	content := container.NewVBox(
+		form,
+		errorLabel,
+	)
+
+	var modal dialog.Dialog
+	modal = dialog.NewCustomConfirm("Request Settings", "Save", "Cancel", content, func(ok bool) {
 		if !ok {
+			errorLabel.Hide()
 			return
 		}
 
-		timeoutSeconds, _ := strconv.Atoi(strings.TrimSpace(timeoutEntry.Text))
-		requestsPerMinute, _ := strconv.Atoi(strings.TrimSpace(concurrencyEntry.Text))
+		timeoutSeconds, requestsPerMinute, err := validateInputs()
+		if err != nil {
+			errorLabel.SetText(err.Error())
+			errorLabel.Show()
+			modal.Show()
+			return
+		}
+
+		errorLabel.Hide()
 		_, changed := throttleState.Update(time.Duration(timeoutSeconds)*time.Second, requestsPerMinute)
-		if !changed {
-			return
+		if changed {
+			loadMainApplication(win)
 		}
-
-		loadMainApplication(window)
-	}, window)
-	dialog.Resize(fyne.NewSize(420, 0))
-	dialog.Show()
+	}, win)
+	modal.Resize(fyne.NewSize(420, 0))
+	modal.Show()
 }
 
 func copyToClipboard(window fyne.Window, content string) {
