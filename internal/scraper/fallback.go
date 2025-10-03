@@ -118,15 +118,14 @@ func synthesizeKeywordInsights(seed string, limit int) []KeywordInsight {
 		if search < 120 {
 			search = 120 + idx*5
 		}
-		competition := math.Round((0.18+weight*0.55)*100) / 100
+		contain, exact := estimateTitleMatches(phrase)
 		relevancy := math.Round(math.Max(0.5, 0.92-float64(idx)*0.035+(1-weight)*0.18)*100) / 100
-		density := math.Round((0.22+(1-weight)*0.4)*100) / 100
 		insights = append(insights, KeywordInsight{
 			Keyword:          phrase,
 			SearchVolume:     search,
-			CompetitionScore: competition,
+			CompetitionScore: float64(contain),
 			RelevancyScore:   relevancy,
-			TitleDensity:     density,
+			TitleDensity:     float64(exact),
 		})
 	}
 
@@ -178,7 +177,7 @@ func synthesizeBestsellers(keyword, country string) []BestsellerProduct {
 		asin := fmt.Sprintf("OFFLINE%05d", i+1)
 		bestsellerRank := 350 + i*27 + int(stableFloat(fmt.Sprintf("bsr-%d-%s", i, keyword))*120)
 		indie := i%3 != 0
-		density := math.Round((0.24+stableFloat(fmt.Sprintf("density-%d-%s", i, keyword))*0.5)*100) / 100
+		_, exact := estimateTitleMatches(keyword)
 		url := fmt.Sprintf("https://%s/dp/%s", cfg.Host, asin)
 
 		products = append(products, BestsellerProduct{
@@ -192,7 +191,7 @@ func synthesizeBestsellers(keyword, country string) []BestsellerProduct {
 			BestSeller:   bestsellerRank,
 			Category:     categoryFallbacks[i%len(categoryFallbacks)],
 			IsIndie:      indie,
-			TitleDensity: density,
+			TitleDensity: float64(exact),
 			URL:          url,
 		})
 	}

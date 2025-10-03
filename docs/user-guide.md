@@ -72,7 +72,7 @@ RankBeam opens with a top navigation bar and four main tabs:
 
 This tab combines three complementary actions:
 
-- **Fetch Keyword Suggestions** – Returns search suggestions with estimated volume, competition, and title density.
+- **Fetch Keyword Suggestions** – Returns search suggestions with estimated volume, competition (number of top titles that include the keyword), and title density (count of exact-match titles).
 - **Category Insights** – Highlights categories that align with your seed term.
 - **Bestseller Snapshot** – Analyzes the top-ranking ASINs, including BSR, pricing, and indie-only filtering.
 
@@ -81,8 +81,8 @@ This tab combines three complementary actions:
 2. Select the target marketplace.
 3. Optional: refine filters
    - **Min Search Volume** – Ignore low-volume ideas.
-   - **Max Competition** – Cap the acceptable competition score.
-   - **Max Title Density** – Screen out saturated titles.
+   - **Max Competition** – Cap the acceptable count of titles that include your keyword.
+   - **Max Title Density** – Screen out keywords that already have many exact-match titles.
    - **Max BSR** and **Indie authors only** – Focus bestseller analysis on manageable competition.
 4. Run each action via its dedicated button. Outputs populate the corresponding labeled sections below.
 
@@ -92,7 +92,7 @@ This workspace blends reverse ASIN reconnaissance with campaign planning:
 
 - **Reverse ASIN Intelligence**
   1. Enter a competitor ASIN and marketplace.
-  2. Tune the keyword filters (volume, competition, title density).
+  2. Tune the keyword filters (volume, competition count, title density count).
   3. Click **Run Reverse ASIN** to reveal the highest-leverage keywords that drive the listing.
 
 - **Amazon Ads Planner**

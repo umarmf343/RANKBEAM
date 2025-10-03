@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"image/color"
 	"io"
+	"math"
 	"net/url"
 	"sort"
 	"strconv"
@@ -382,7 +383,7 @@ func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, count
 	minVolumeEntry := widget.NewEntry()
 	minVolumeEntry.SetPlaceHolder("0")
 	maxCompetitionEntry := widget.NewEntry()
-	maxCompetitionEntry.SetPlaceHolder("1.0")
+	maxCompetitionEntry.SetPlaceHolder("5")
 	maxDensityEntry := widget.NewEntry()
 	maxDensityEntry.SetPlaceHolder("100")
 
@@ -648,11 +649,11 @@ func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, count
 	})
 	bestsellerControls.Objects = []fyne.CanvasObject{bestsellerCopy, bestsellerJSON, bestsellerCSV}
 
-	keywordInfoAction := newInfoButton(window, "Generates keyword ideas with volume, competition and relevancy scores from Amazon auto-complete data.")
+	keywordInfoAction := newInfoButton(window, "Generates keyword ideas with volume, competition counts and relevancy scores from Amazon auto-complete data.")
 	categoryInfoAction := newInfoButton(window, "Highlights categories where the seed term is trending so you can position listings effectively.")
 	bestsellerInfoAction := newInfoButton(window, "Summarises top selling books for the keyword to benchmark pricing, reviews and rank metrics.")
 
-	keywordInfoHeader := newInfoButton(window, "Generates keyword ideas with volume, competition and relevancy scores from Amazon auto-complete data.")
+	keywordInfoHeader := newInfoButton(window, "Generates keyword ideas with volume, competition counts and relevancy scores from Amazon auto-complete data.")
 	categoryInfoHeader := newInfoButton(window, "Highlights categories where the seed term is trending so you can position listings effectively.")
 	bestsellerInfoHeader := newInfoButton(window, "Summarises top selling books for the keyword to benchmark pricing, reviews and rank metrics.")
 
@@ -962,7 +963,7 @@ func buildCompetitiveTab(window fyne.Window, service *scraper.Service, countries
 	minVolumeEntry := widget.NewEntry()
 	minVolumeEntry.SetPlaceHolder("0")
 	maxCompetitionEntry := widget.NewEntry()
-	maxCompetitionEntry.SetPlaceHolder("1.0")
+	maxCompetitionEntry.SetPlaceHolder("5")
 	maxDensityEntry := widget.NewEntry()
 	maxDensityEntry.SetPlaceHolder("100")
 
@@ -1561,11 +1562,15 @@ func buildProductCards(details *scraper.ProductDetails) []fyne.CanvasObject {
 	)...)
 
 	currencyPrice := strings.TrimSpace(strings.TrimSpace(details.Currency + " " + details.Price))
+	densityRow := ""
+	if count := formatCount(details.TitleDensity); count != "" {
+		densityRow = fmt.Sprintf("Title Density: %s titles", count)
+	}
 	pricingContent := container.NewVBox(buildRows(
 		fmt.Sprintf("Price: %s", fallback(currencyPrice, "Not available")),
 		fmt.Sprintf("Rating: %s", fallback(details.Rating, "Unknown")),
 		fmt.Sprintf("Reviews: %s", fallback(details.ReviewCount, "Unknown")),
-		fmt.Sprintf("Title Density: %s", formatFloat(details.TitleDensity)),
+		densityRow,
 		fmt.Sprintf("Independent Publisher: %s", boolToString(details.IsIndependent)),
 	)...)
 
@@ -1650,7 +1655,7 @@ func updateKeywordChart(chart *fyne.Container, insights []scraper.KeywordInsight
 				widget.NewLabel(fmt.Sprintf("%d", insight.SearchVolume)),
 			),
 			container.NewMax(background, bar),
-			widget.NewLabel(fmt.Sprintf("Competition %.2f • Relevancy %.2f • Title Density %.2f", insight.CompetitionScore, insight.RelevancyScore, insight.TitleDensity)),
+			widget.NewLabel(fmt.Sprintf("Competition %s • Relevancy %.2f • Title Density %s", formatCount(insight.CompetitionScore), insight.RelevancyScore, formatCount(insight.TitleDensity))),
 		))
 	}
 	chart.Refresh()
@@ -1863,7 +1868,7 @@ func exportProductCSV(window fyne.Window, details *scraper.ProductDetails) {
 		fallback(details.PrintLength, ""),
 		fallback(details.Dimensions, ""),
 		fallback(details.Language, ""),
-		formatFloat(details.TitleDensity),
+		formatCount(details.TitleDensity),
 		boolToString(details.IsIndependent),
 		fallback(details.URL, ""),
 		strings.Join(ranks, " | "),
@@ -1883,9 +1888,9 @@ func exportKeywordCSV(window fyne.Window, insights []scraper.KeywordInsight) {
 		rows = append(rows, []string{
 			insight.Keyword,
 			strconv.Itoa(insight.SearchVolume),
-			formatFloat(insight.CompetitionScore),
+			formatCount(insight.CompetitionScore),
 			formatFloat(insight.RelevancyScore),
-			formatFloat(insight.TitleDensity),
+			formatCount(insight.TitleDensity),
 		})
 	}
 	exportCSV(window, "keywords.csv", []string{"Keyword", "SearchVolume", "Competition", "Relevancy", "TitleDensity"}, rows)
@@ -1972,6 +1977,13 @@ func formatFloat(value float64) string {
 	return fmt.Sprintf("%.2f", value)
 }
 
+func formatCount(value float64) string {
+	if value < 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d", int(math.Round(value)))
+}
+
 func isValidASIN(asin string) bool {
 	if len(asin) != 10 {
 		return false
@@ -2025,7 +2037,9 @@ func formatProductDetails(details *scraper.ProductDetails) string {
 		fmt.Fprintf(builder, "ISBN-10: %s | ISBN-13: %s\n", fallback(details.ISBN10, "N/A"), fallback(details.ISBN13, "N/A"))
 	}
 	if details.TitleDensity > 0 {
-		fmt.Fprintf(builder, "Title Density: %.2f\n", details.TitleDensity)
+		if count := formatCount(details.TitleDensity); count != "" {
+			fmt.Fprintf(builder, "Title Density: %s titles\n", count)
+		}
 	}
 	if len(details.BestSellerRanks) > 0 {
 		sort.SliceStable(details.BestSellerRanks, func(i, j int) bool {
@@ -2070,7 +2084,7 @@ func formatKeywordInsights(insights []scraper.KeywordInsight) string {
 	for index, insight := range sorted {
 		fmt.Fprintf(builder, "%d. %s\n", index+1, insight.Keyword)
 		fmt.Fprintf(builder, "   Search Volume: %d\n", insight.SearchVolume)
-		fmt.Fprintf(builder, "   Competition: %.2f | Relevancy: %.2f | Title Density: %.2f\n\n", insight.CompetitionScore, insight.RelevancyScore, insight.TitleDensity)
+		fmt.Fprintf(builder, "   Competition: %s titles | Relevancy: %.2f | Title Density: %s titles\n\n", formatCount(insight.CompetitionScore), insight.RelevancyScore, formatCount(insight.TitleDensity))
 	}
 
 	return strings.TrimSpace(builder.String())
@@ -2125,8 +2139,8 @@ func formatBestsellerProducts(products []scraper.BestsellerProduct) string {
 		if product.IsIndie {
 			builder.WriteString("   Independent Author Highlight\n")
 		}
-		if product.TitleDensity > 0 {
-			fmt.Fprintf(builder, "   Title Density: %.2f\n", product.TitleDensity)
+		if count := formatCount(product.TitleDensity); count != "" {
+			fmt.Fprintf(builder, "   Title Density: %s titles\n", count)
 		}
 		if product.URL != "" {
 			fmt.Fprintf(builder, "   URL: %s\n", product.URL)
@@ -2516,10 +2530,10 @@ func parseKeywordFilter(minVolume, maxCompetition, maxDensity string) (scraper.K
 	if trimmed := strings.TrimSpace(maxCompetition); trimmed != "" {
 		value, err := strconv.ParseFloat(trimmed, 64)
 		if err != nil {
-			return filter, fmt.Errorf("invalid maximum competition score: %w", err)
+			return filter, fmt.Errorf("invalid maximum competition count: %w", err)
 		}
 		if value < 0 {
-			return filter, errors.New("maximum competition score cannot be negative")
+			return filter, errors.New("maximum competition count cannot be negative")
 		}
 		filter.MaxCompetitionScore = value
 	}
@@ -2527,10 +2541,10 @@ func parseKeywordFilter(minVolume, maxCompetition, maxDensity string) (scraper.K
 	if trimmed := strings.TrimSpace(maxDensity); trimmed != "" {
 		value, err := strconv.ParseFloat(trimmed, 64)
 		if err != nil {
-			return filter, fmt.Errorf("invalid maximum title density: %w", err)
+			return filter, fmt.Errorf("invalid maximum title density count: %w", err)
 		}
 		if value < 0 {
-			return filter, errors.New("maximum title density cannot be negative")
+			return filter, errors.New("maximum title density count cannot be negative")
 		}
 		filter.MaxTitleDensity = value
 	}
