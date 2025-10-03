@@ -1747,6 +1747,9 @@ func showThrottleSettingsDialog(window fyne.Window) {
 	modal = dialog.NewCustomConfirm("Request Settings", "Save", "Cancel", content, func(ok bool) {
 		if !ok {
 			errorLabel.Hide()
+			if modal != nil {
+				modal.Hide()
+			}
 			return
 		}
 
@@ -1754,11 +1757,16 @@ func showThrottleSettingsDialog(window fyne.Window) {
 		if err != nil {
 			errorLabel.SetText(err.Error())
 			errorLabel.Show()
-			modal.Show()
+			if modal != nil {
+				modal.Show()
+			}
 			return
 		}
 
 		errorLabel.Hide()
+		if modal != nil {
+			modal.Hide()
+		}
 		_, changed := throttleState.Update(time.Duration(timeoutSeconds)*time.Second, requestsPerMinute)
 		if changed {
 			loadMainApplication(win)
