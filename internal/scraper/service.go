@@ -18,7 +18,7 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 
-    "github.com/umarmf343/Umar-kdp-product-api/internal/logging"
+	"github.com/umarmf343/Umar-kdp-product-api/internal/logging"
 )
 
 // Service encapsulates HTTP access and scraping helpers used by the application.
@@ -251,7 +251,7 @@ func (s *Service) KeywordSuggestions(ctx context.Context, keyword, country strin
 	params.Set("page-type", "Search")
 	params.Set("client-info", "amazon-search-ui")
 	params.Set("limit", "15")
-	params.Set("mid", cfg.MarketID)
+	params.Set("mid", cfg.MarketplaceID)
 	params.Set("alias", "aps")
 	params.Set("suggestion-type", "KEYWORD")
 	params.Set("prefix", keyword)
