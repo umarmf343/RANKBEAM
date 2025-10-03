@@ -247,12 +247,18 @@ func (s *Service) KeywordSuggestions(ctx context.Context, keyword, country strin
 
 	cfg := ConfigFor(strings.ToUpper(country))
 
+	alias := strings.TrimSpace(filters.SearchAlias)
+	if alias == "" {
+		alias = "stripbooks"
+	}
+
 	params := url.Values{}
 	params.Set("page-type", "Search")
 	params.Set("client-info", "amazon-search-ui")
 	params.Set("limit", "15")
 	params.Set("mid", cfg.MarketplaceID)
-	params.Set("alias", "aps")
+	params.Set("alias", alias)
+	params.Set("search-alias", alias)
 	params.Set("suggestion-type", "KEYWORD")
 	params.Set("prefix", keyword)
 
@@ -345,10 +351,14 @@ func (s *Service) KeywordSuggestions(ctx context.Context, keyword, country strin
 }
 
 // CategorySuggestions scrapes the Amazon search result sidebar to collect frequently appearing departments.
-func (s *Service) CategorySuggestions(ctx context.Context, keyword, country string) ([]CategoryTrend, error) {
+func (s *Service) CategorySuggestions(ctx context.Context, keyword, country, alias string) ([]CategoryTrend, error) {
 	keyword = strings.TrimSpace(keyword)
 	if keyword == "" {
 		return nil, errors.New("keyword is required")
+	}
+
+	if strings.TrimSpace(alias) == "" {
+		alias = "stripbooks"
 	}
 
 	cfg := ConfigFor(strings.ToUpper(country))
@@ -356,6 +366,7 @@ func (s *Service) CategorySuggestions(ctx context.Context, keyword, country stri
 
 	params := url.Values{}
 	params.Set("k", keyword)
+	params.Set("i", alias)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+"?"+params.Encode(), nil)
 	if err != nil {
@@ -421,10 +432,14 @@ func (s *Service) CategorySuggestions(ctx context.Context, keyword, country stri
 }
 
 // BestsellerAnalysis scrapes the first page of Amazon search results and treats them as bestseller insights.
-func (s *Service) BestsellerAnalysis(ctx context.Context, keyword, country string, filter BestsellerFilter) ([]BestsellerProduct, error) {
+func (s *Service) BestsellerAnalysis(ctx context.Context, keyword, country, alias string, filter BestsellerFilter) ([]BestsellerProduct, error) {
 	keyword = strings.TrimSpace(keyword)
 	if keyword == "" {
 		return nil, errors.New("keyword is required")
+	}
+
+	if strings.TrimSpace(alias) == "" {
+		alias = "stripbooks"
 	}
 
 	cfg := ConfigFor(strings.ToUpper(country))
@@ -432,7 +447,7 @@ func (s *Service) BestsellerAnalysis(ctx context.Context, keyword, country strin
 
 	params := url.Values{}
 	params.Set("k", keyword)
-	params.Set("i", "stripbooks")
+	params.Set("i", alias)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+"?"+params.Encode(), nil)
 	if err != nil {
@@ -684,8 +699,8 @@ func (s *Service) GenerateAMSKeywords(ctx context.Context, title, description st
 }
 
 // FetchCategoryTrends approximates category momentum by revisiting category suggestions over time.
-func (s *Service) FetchCategoryTrends(ctx context.Context, categoryKeyword, country string) ([]CategoryTrend, error) {
-	trends, err := s.CategorySuggestions(ctx, categoryKeyword, country)
+func (s *Service) FetchCategoryTrends(ctx context.Context, categoryKeyword, country, alias string) ([]CategoryTrend, error) {
+	trends, err := s.CategorySuggestions(ctx, categoryKeyword, country, alias)
 	if err != nil {
 		return nil, err
 	}

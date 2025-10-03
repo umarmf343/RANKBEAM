@@ -111,6 +111,7 @@ type keywordPreset struct {
 	MaxDensity     string
 	MaxRank        string
 	IndieOnly      bool
+	Format         string
 }
 
 var (
@@ -385,6 +386,58 @@ func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, count
 	maxDensityEntry := widget.NewEntry()
 	maxDensityEntry.SetPlaceHolder("100")
 
+	const (
+		bookFormatAll         = "All Books"
+		bookFormatKindle      = "Kindle"
+		bookFormatPaperback   = "Paperback"
+		bookFormatHardcover   = "Hardcover"
+		presetCollapsedOffset = 0.02
+		presetDefaultOffset   = 0.28
+		presetExpandedOffset  = 0.4
+	)
+
+	formatOptions := []string{bookFormatAll, bookFormatKindle, bookFormatPaperback, bookFormatHardcover}
+	formatSelect := widget.NewSelect(formatOptions, nil)
+	formatSelect.SetSelected(bookFormatAll)
+
+	normalizeFormat := func(selected string) string {
+		trimmed := strings.TrimSpace(selected)
+		for _, option := range formatOptions {
+			if option == trimmed {
+				return option
+			}
+		}
+		return bookFormatAll
+	}
+
+	resolveBookSearch := func(seed, selectedFormat string) (string, string) {
+		trimmed := strings.TrimSpace(seed)
+		if trimmed == "" {
+			return "", "stripbooks"
+		}
+
+		alias := "stripbooks"
+		qualifier := ""
+
+		switch selected := normalizeFormat(selectedFormat); selected {
+		case bookFormatKindle:
+			alias = "digital-text"
+			qualifier = "kindle edition"
+		case bookFormatPaperback:
+			qualifier = "paperback"
+		case bookFormatHardcover:
+			qualifier = "hardcover"
+		default:
+			alias = "stripbooks"
+		}
+
+		if qualifier != "" {
+			trimmed = strings.TrimSpace(fmt.Sprintf("%s %s", trimmed, qualifier))
+		}
+
+		return trimmed, alias
+	}
+
 	maxRankEntry := widget.NewEntry()
 	maxRankEntry.SetPlaceHolder("50000")
 	indieOnlyCheck := widget.NewCheck("Indie authors only", nil)
@@ -469,6 +522,7 @@ func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, count
 		maxDensityEntry.SetText(preset.MaxDensity)
 		maxRankEntry.SetText(preset.MaxRank)
 		indieOnlyCheck.SetChecked(preset.IndieOnly)
+		formatSelect.SetSelected(normalizeFormat(preset.Format))
 	}
 
 	presetList.OnUnselected = func(id widget.ListItemID) {
@@ -501,6 +555,7 @@ func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, count
 			MaxDensity:     strings.TrimSpace(maxDensityEntry.Text),
 			MaxRank:        strings.TrimSpace(maxRankEntry.Text),
 			IndieOnly:      indieOnlyCheck.Checked,
+			Format:         normalizeFormat(formatSelect.Selected),
 		}
 
 		saveKeywordPreset(preset)
@@ -613,17 +668,21 @@ func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, count
 			return
 		}
 
+		format := normalizeFormat(formatSelect.Selected)
+		searchSeed, alias := resolveBookSearch(seed, format)
+
 		filters, err := parseKeywordFilter(minVolumeEntry.Text, maxCompetitionEntry.Text, maxDensityEntry.Text)
 		if err != nil {
 			dialog.ShowError(err, window)
 			return
 		}
+		filters.SearchAlias = alias
 
 		activity.Start()
 		quota.Use()
 
 		ctx, cancel := context.WithTimeout(context.Background(), currentRequestTimeout())
-		progress := newCancelableProgress(window, "Keyword Research", fmt.Sprintf("Collecting ideas for \"%s\"…", seed), cancel)
+		progress := newCancelableProgress(window, "Keyword Research", fmt.Sprintf("Collecting ideas for \"%s\"…", searchSeed), cancel)
 		if progress != nil {
 			progress.Show()
 		}
@@ -631,7 +690,7 @@ func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, count
 		go func() {
 			defer cancel()
 
-			insights, err := service.KeywordSuggestions(ctx, seed, country, filters)
+			insights, err := service.KeywordSuggestions(ctx, searchSeed, country, filters)
 
 			queueOnMain(window, func() {
 				activity.Done()
@@ -674,6 +733,9 @@ func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, count
 			return
 		}
 
+		format := normalizeFormat(formatSelect.Selected)
+		searchSeed, alias := resolveBookSearch(seed, format)
+
 		activity.Start()
 		quota.Use()
 
@@ -686,7 +748,7 @@ func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, count
 		go func() {
 			defer cancel()
 
-			trends, err := service.FetchCategoryTrends(ctx, seed, country)
+			trends, err := service.FetchCategoryTrends(ctx, searchSeed, country, alias)
 
 			queueOnMain(window, func() {
 				activity.Done()
@@ -726,6 +788,9 @@ func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, count
 			return
 		}
 
+		format := normalizeFormat(formatSelect.Selected)
+		searchSeed, alias := resolveBookSearch(seed, format)
+
 		filter, err := parseBestsellerFilter(maxRankEntry.Text, indieOnlyCheck.Checked)
 		if err != nil {
 			dialog.ShowError(err, window)
@@ -736,7 +801,7 @@ func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, count
 		quota.Use()
 
 		ctx, cancel := context.WithTimeout(context.Background(), currentRequestTimeout())
-		progress := newCancelableProgress(window, "Bestseller Snapshot", fmt.Sprintf("Reviewing top results for \"%s\"…", seed), cancel)
+		progress := newCancelableProgress(window, "Bestseller Snapshot", fmt.Sprintf("Reviewing top results for \"%s\"…", searchSeed), cancel)
 		if progress != nil {
 			progress.Show()
 		}
@@ -744,7 +809,7 @@ func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, count
 		go func() {
 			defer cancel()
 
-			products, err := service.BestsellerAnalysis(ctx, seed, country, filter)
+			products, err := service.BestsellerAnalysis(ctx, searchSeed, country, alias, filter)
 
 			queueOnMain(window, func() {
 				activity.Done()
@@ -821,8 +886,33 @@ func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, count
 	)
 	keywordOutputs.SetTabLocation(container.TabLocationTop)
 
+	var split *container.Split
+
+	presetTitle := widget.NewLabelWithStyle("Research Presets", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+	minimizePresets := widget.NewButtonWithIcon("Minimize", theme.ContentRemoveIcon(), func() {
+		if split == nil {
+			return
+		}
+		split.SetOffset(presetCollapsedOffset)
+	})
+	minimizePresets.Importance = widget.LowImportance
+
+	maximizePresets := widget.NewButtonWithIcon("Maximize", theme.ViewFullScreenIcon(), func() {
+		if split == nil {
+			return
+		}
+		if split.Offset >= presetExpandedOffset-0.01 {
+			split.SetOffset(presetDefaultOffset)
+			return
+		}
+		split.SetOffset(presetExpandedOffset)
+	})
+	maximizePresets.Importance = widget.LowImportance
+
+	presetHeader := container.NewHBox(presetTitle, layout.NewSpacer(), minimizePresets, maximizePresets)
+
 	presetSidebar := container.NewVBox(
-		widget.NewLabelWithStyle("Research Presets", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		presetHeader,
 		presetInfo,
 		presetNameEntry,
 		container.NewGridWithColumns(1, savePresetButton),
@@ -833,6 +923,7 @@ func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, count
 	form := widget.NewForm(
 		widget.NewFormItem("Seed Keyword", keywordEntry),
 		widget.NewFormItem("Marketplace", countrySelect),
+		widget.NewFormItem("Format", formatSelect),
 	)
 	form.SubmitText = "Fetch Suggestions"
 	form.OnSubmit = fetchKeywords
@@ -847,8 +938,8 @@ func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, count
 		keywordOutputs,
 	)
 
-	split := container.NewHSplit(container.NewPadded(presetSidebar), container.NewPadded(mainContent))
-	split.SetOffset(0.28)
+	split = container.NewHSplit(container.NewPadded(presetSidebar), container.NewPadded(mainContent))
+	split.SetOffset(presetDefaultOffset)
 
 	return split
 }

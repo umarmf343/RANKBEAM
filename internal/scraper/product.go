@@ -81,6 +81,7 @@ type KeywordFilter struct {
 	MinSearchVolume     int
 	MaxCompetitionScore float64
 	MaxTitleDensity     float64
+	SearchAlias         string
 }
 
 // BestsellerFilter describes filters for bestseller search results.
