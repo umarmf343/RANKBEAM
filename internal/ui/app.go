@@ -967,20 +967,20 @@ func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, count
 		exportDialog.Show()
 	})
 
-	searchBar := container.NewAdaptiveGridWithColumns(4,
+	searchBar := container.NewAdaptiveGrid(4,
 		labeledField("Seed Keyword", keywordEntry),
 		labeledField("Marketplace", countrySelect),
 		labeledField("Format", formatSelect),
 		container.NewVBox(widget.NewLabel(" "), container.NewHBox(newSearchButton, exportButton)),
 	)
 
-	keywordFilters := container.NewAdaptiveGridWithColumns(3,
+	keywordFilters := container.NewAdaptiveGrid(3,
 		labeledField("Minimum Volume", minVolumeEntry),
 		labeledField("Max Competition", maxCompetitionEntry),
 		labeledField("Max Title Density", maxDensityEntry),
 	)
 
-	bestsellerFilters := container.NewAdaptiveGridWithColumns(2,
+	bestsellerFilters := container.NewAdaptiveGrid(2,
 		labeledField("Max Bestseller Rank", maxRankEntry),
 		container.NewVBox(widget.NewLabelWithStyle("Options", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), indieOnlyCheck),
 	)
@@ -988,7 +988,7 @@ func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, count
 	categoryButton := widget.NewButton("Category Insights", fetchCategories)
 	bestsellerButton := widget.NewButton("Bestseller Snapshot", fetchBestsellers)
 
-	actionGrid := container.NewAdaptiveGridWithColumns(2,
+	actionGrid := container.NewAdaptiveGrid(2,
 		container.NewHBox(categoryButton, categoryInfoAction),
 		container.NewHBox(bestsellerButton, bestsellerInfoAction),
 	)
