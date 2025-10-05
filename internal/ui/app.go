@@ -167,7 +167,17 @@ func loadMainApplication(window fyne.Window) {
 	activeService = service
 
 	countries := scraper.Countries()
-	sort.Strings(countries)
+	sort.SliceStable(countries, func(i, j int) bool {
+		left := strings.ToUpper(countries[i])
+		right := strings.ToUpper(countries[j])
+		if left == "US" {
+			return true
+		}
+		if right == "US" {
+			return false
+		}
+		return left < right
+	})
 
 	statusBinding := binding.NewString()
 	statusBinding.Set("🟢 Service ready")
@@ -2150,10 +2160,10 @@ func showThrottleSettingsDialog(window fyne.Window) {
 		return timeoutSeconds, requestsPerMinute, nil
 	}
 
-	content := container.NewVBox(
-		form,
-		errorLabel,
-	)
+	formScroll := container.NewVScroll(form)
+	formScroll.SetMinSize(fyne.NewSize(0, 220))
+
+	content := container.NewBorder(nil, container.NewVBox(errorLabel), nil, nil, formScroll)
 
 	var modal dialog.Dialog
 	modal = dialog.NewCustomConfirm("Request Settings", "Save", "Cancel", content, func(ok bool) {
@@ -2184,7 +2194,7 @@ func showThrottleSettingsDialog(window fyne.Window) {
 			loadMainApplication(win)
 		}
 	}, win)
-	modal.Resize(fyne.NewSize(420, 0))
+	modal.Resize(fyne.NewSize(420, 360))
 	modal.Show()
 }
 
