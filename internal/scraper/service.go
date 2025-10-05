@@ -32,9 +32,10 @@ type Service struct {
 
 // ErrServiceClosed indicates the scraper service has been closed.
 var (
-	ErrServiceClosed = errors.New("scraper service closed")
-	ErrBotDetected   = errors.New("amazon requested captcha verification")
-	bsrPattern       = regexp.MustCompile(`#([0-9,]+)\s+in\s+([^()\n>]+)`)
+	ErrServiceClosed     = errors.New("scraper service closed")
+	ErrBotDetected       = errors.New("amazon requested captcha verification")
+	bsrPattern           = regexp.MustCompile(`#([0-9,]+)\s+in\s+([^()\n>]+)`)
+	resultsNumberPattern = regexp.MustCompile(`\d[\d,.]*`)
 )
 
 // NewService creates a scraper service with sane defaults such as timeout handling,
@@ -845,6 +846,7 @@ func (s *Service) computeTitleMatches(ctx context.Context, keyword, country stri
 	total := 0
 	containing := 0
 	exact := 0
+	resultsCount := extractSearchResultCount(doc)
 	needle := strings.ToLower(keyword)
 	doc.Find("div.s-main-slot div[data-component-type='s-search-result']").EachWithBreak(func(i int, selection *goquery.Selection) bool {
 		if total >= 10 {
@@ -865,7 +867,89 @@ func (s *Service) computeTitleMatches(ctx context.Context, keyword, country stri
 		return total < 10
 	})
 
+	if resultsCount > 0 {
+		containing = resultsCount
+	}
+
 	return containing, exact, nil
+}
+
+func extractSearchResultCount(doc *goquery.Document) int {
+	if doc == nil {
+		return -1
+	}
+
+	selectors := []string{
+		"div.s-desktop-toolbar span",
+		"div[data-component-type='s-result-info-bar'] span",
+		"#search span",
+		"#search div",
+	}
+
+	seen := map[string]struct{}{}
+	for _, selector := range selectors {
+		count := -1
+		doc.Find(selector).EachWithBreak(func(i int, selection *goquery.Selection) bool {
+			text := strings.TrimSpace(selection.Text())
+			if text == "" {
+				return true
+			}
+			if _, ok := seen[text]; ok {
+				return true
+			}
+			seen[text] = struct{}{}
+			if c := parseSearchResultCountFromText(text); c > 0 {
+				count = c
+				return false
+			}
+			return true
+		})
+		if count > 0 {
+			return count
+		}
+	}
+
+	return -1
+}
+
+func parseSearchResultCountFromText(text string) int {
+	lowered := strings.ToLower(text)
+	if !strings.Contains(lowered, "result") {
+		return -1
+	}
+
+	numbers := resultsNumberPattern.FindAllString(text, -1)
+	if len(numbers) == 0 {
+		return -1
+	}
+
+	if idx := strings.Index(lowered, "of"); idx >= 0 {
+		after := text[idx:]
+		afterNumbers := resultsNumberPattern.FindAllString(after, -1)
+		for _, candidate := range afterNumbers {
+			if value := parseNumericCandidate(candidate); value > 0 {
+				return value
+			}
+		}
+	}
+
+	for i := len(numbers) - 1; i >= 0; i-- {
+		if value := parseNumericCandidate(numbers[i]); value > 0 {
+			return value
+		}
+	}
+
+	return -1
+}
+
+func parseNumericCandidate(token string) int {
+	cleaned := strings.ReplaceAll(token, ",", "")
+	cleaned = strings.ReplaceAll(cleaned, ".", "")
+	value, err := strconv.Atoi(cleaned)
+	if err != nil {
+		return -1
+	}
+	return value
 }
 
 func parsePublisher(doc *goquery.Document) string {
