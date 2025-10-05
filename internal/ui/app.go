@@ -253,7 +253,23 @@ func buildProductLookupTab(window fyne.Window, service *scraper.Service, countri
 	validationHint := canvas.NewText("ASINs are 10 characters (A-Z, 0-9).", theme.DisabledColor())
 	validationHint.Alignment = fyne.TextAlignLeading
 
+	searchEntry := widget.NewEntry()
+	searchEntry.SetPlaceHolder("children's book about space")
+
+	searchFormatOptions := []string{"All Books", "Kindle", "Paperback", "Hardcover"}
+	searchFormatSelect := widget.NewSelect(searchFormatOptions, nil)
+	searchFormatSelect.SetSelected(searchFormatOptions[0])
+
+	maxResultsEntry := widget.NewEntry()
+	maxResultsEntry.SetPlaceHolder("15")
+
+	searchBinding := binding.NewString()
+	searchBinding.Set("Enter a keyword and press Search Catalog to capture live listings.")
+	searchStatusLabel := widget.NewLabelWithData(searchBinding)
+	searchStatusLabel.Wrapping = fyne.TextWrapWord
+
 	var lastProduct *scraper.ProductDetails
+	var lastSearchResults []scraper.SearchResult
 
 	productCards := container.NewVBox(summaryLabel)
 
@@ -279,6 +295,145 @@ func buildProductLookupTab(window fyne.Window, service *scraper.Service, countri
 	controlRow := container.NewHBox(copyButton, jsonButton, csvButton)
 	controlRow.Hide()
 
+	searchCopy := widget.NewButtonWithIcon("Copy", theme.ContentCopyIcon(), func() {
+		if len(lastSearchResults) == 0 {
+			return
+		}
+		copyToClipboard(window, formatSearchResults(lastSearchResults))
+	})
+	searchJSON := widget.NewButtonWithIcon("Export JSON", theme.DocumentIcon(), func() {
+		if len(lastSearchResults) == 0 {
+			return
+		}
+		exportJSON(window, "catalog-search.json", lastSearchResults)
+	})
+	searchCSV := widget.NewButtonWithIcon("Export CSV", theme.DocumentIcon(), func() {
+		if len(lastSearchResults) == 0 {
+			return
+		}
+		exportSearchCSV(window, lastSearchResults)
+	})
+
+	searchControls := container.NewHBox(searchCopy, searchJSON, searchCSV)
+	searchControls.Hide()
+
+	searchTableData := make([]scraper.SearchResult, 0)
+	searchTable := widget.NewTable(
+		func() (int, int) {
+			rows := len(searchTableData)
+			if rows == 0 {
+				return 1, 8
+			}
+			return rows + 1, 8
+		},
+		func() fyne.CanvasObject {
+			label := widget.NewLabel("")
+			label.Alignment = fyne.TextAlignLeading
+			label.Wrapping = fyne.TextWrapOff
+			return label
+		},
+		func(id widget.TableCellID, object fyne.CanvasObject) {
+			label, _ := object.(*widget.Label)
+			if label == nil {
+				return
+			}
+
+			label.Alignment = fyne.TextAlignLeading
+			label.Wrapping = fyne.TextWrapOff
+			label.TextStyle = fyne.TextStyle{}
+
+			headers := []string{"Rank", "Title", "Author", "Price", "Rating", "Reviews", "Best Seller Rank", "URL"}
+			if id.Row == 0 {
+				if id.Col < len(headers) {
+					label.TextStyle = fyne.TextStyle{Bold: true}
+					if id.Col == 0 {
+						label.Alignment = fyne.TextAlignCenter
+					} else if id.Col >= 3 {
+						label.Alignment = fyne.TextAlignCenter
+					}
+					label.SetText(headers[id.Col])
+				}
+				return
+			}
+
+			if id.Row-1 >= len(searchTableData) {
+				label.SetText("")
+				return
+			}
+
+			result := searchTableData[id.Row-1]
+			switch id.Col {
+			case 0:
+				label.Alignment = fyne.TextAlignCenter
+				label.SetText(strconv.Itoa(result.Rank))
+			case 1:
+				label.Alignment = fyne.TextAlignLeading
+				label.SetText(result.Title)
+			case 2:
+				label.Alignment = fyne.TextAlignLeading
+				label.SetText(result.Author)
+			case 3:
+				label.Alignment = fyne.TextAlignCenter
+				label.SetText(result.Price)
+			case 4:
+				label.Alignment = fyne.TextAlignCenter
+				label.SetText(result.Rating)
+			case 5:
+				label.Alignment = fyne.TextAlignCenter
+				label.SetText(result.ReviewCount)
+			case 6:
+				label.Alignment = fyne.TextAlignCenter
+				label.SetText(result.BestSellerRank)
+			case 7:
+				label.Alignment = fyne.TextAlignLeading
+				label.SetText(result.URL)
+			}
+		},
+	)
+	searchTable.SetColumnWidth(0, 70)
+	searchTable.SetColumnWidth(1, 220)
+	searchTable.SetColumnWidth(2, 180)
+	searchTable.SetColumnWidth(3, 110)
+	searchTable.SetColumnWidth(4, 140)
+	searchTable.SetColumnWidth(5, 140)
+	searchTable.SetColumnWidth(6, 180)
+	searchTable.SetColumnWidth(7, 260)
+
+	searchTableContainer := container.NewPadded(searchTable)
+	searchTableContainer.Hide()
+	searchStatusContainer := container.NewPadded(searchStatusLabel)
+	searchResultStack := container.NewStack(searchStatusContainer, searchTableContainer)
+
+	normalizeSearchFormat := func(selected string) string {
+		trimmed := strings.TrimSpace(selected)
+		for _, option := range searchFormatOptions {
+			if option == trimmed {
+				return option
+			}
+		}
+		return searchFormatOptions[0]
+	}
+
+	resolveSearchSeed := func(seed, selectedFormat string) (string, string) {
+		trimmed := strings.TrimSpace(seed)
+		if trimmed == "" {
+			return "", "stripbooks"
+		}
+
+		alias := "stripbooks"
+		switch normalizeSearchFormat(selectedFormat) {
+		case "Kindle":
+			alias = "digital-text"
+			trimmed = strings.TrimSpace(fmt.Sprintf("%s kindle edition", trimmed))
+		case "Paperback":
+			trimmed = strings.TrimSpace(fmt.Sprintf("%s paperback", trimmed))
+		case "Hardcover":
+			trimmed = strings.TrimSpace(fmt.Sprintf("%s hardcover", trimmed))
+		}
+
+		return trimmed, alias
+	}
+
 	asinEntry.OnChanged = func(value string) {
 		cleaned := strings.ToUpper(strings.TrimSpace(value))
 		if value != cleaned {
@@ -299,7 +454,7 @@ func buildProductLookupTab(window fyne.Window, service *scraper.Service, countri
 		validationHint.Refresh()
 	}
 
-	fetch := func() {
+	fetchProduct := func() {
 		asin := strings.TrimSpace(strings.ToUpper(asinEntry.Text))
 		country := strings.TrimSpace(countrySelect.Selected)
 		if !isValidASIN(asin) {
@@ -352,12 +507,122 @@ func buildProductLookupTab(window fyne.Window, service *scraper.Service, countri
 		}()
 	}
 
+	fetchSearch := func() {
+		keyword := strings.TrimSpace(searchEntry.Text)
+		country := strings.TrimSpace(countrySelect.Selected)
+		if keyword == "" {
+			dialog.ShowInformation("Catalog Search", "Enter a keyword to search.", window)
+			return
+		}
+		if country == "" {
+			dialog.ShowInformation("Catalog Search", "Select the Amazon marketplace you wish to query.", window)
+			return
+		}
+
+		maxResults := 15
+		if text := strings.TrimSpace(maxResultsEntry.Text); text != "" {
+			value, err := strconv.Atoi(text)
+			if err != nil || value <= 0 {
+				dialog.ShowError(fmt.Errorf("Max results must be a positive number"), window)
+				return
+			}
+			maxResults = value
+		}
+
+		searchSeed, alias := resolveSearchSeed(keyword, searchFormatSelect.Selected)
+		if searchSeed == "" {
+			dialog.ShowInformation("Catalog Search", "Provide a keyword to search.", window)
+			return
+		}
+
+		activity.Start()
+		quota.Use()
+
+		safeSet(searchBinding, fmt.Sprintf("Searching for \"%s\"…", searchSeed))
+		searchControls.Hide()
+		searchTableContainer.Hide()
+		searchStatusContainer.Show()
+		searchResultStack.Refresh()
+		searchTableData = searchTableData[:0]
+		searchTable.Refresh()
+
+		ctx, cancel := context.WithTimeout(context.Background(), currentRequestTimeout())
+		progress := newCancelableProgress(window, "Catalog Search", fmt.Sprintf("Collecting listings for \"%s\"…", searchSeed), cancel)
+		if progress != nil {
+			progress.Show()
+		}
+
+		go func() {
+			defer cancel()
+
+			results, err := service.SearchProducts(ctx, searchSeed, country, alias, maxResults)
+
+			queueOnMain(window, func() {
+				activity.Done()
+				if progress != nil {
+					progress.Hide()
+				}
+				if err != nil {
+					if !errors.Is(err, context.Canceled) {
+						dialog.ShowError(err, window)
+					}
+					message := "Request cancelled."
+					if !errors.Is(err, context.Canceled) {
+						message = fmt.Sprintf("Unable to search catalog: %v", err)
+					}
+					safeSet(searchBinding, message)
+					lastSearchResults = nil
+					searchControls.Hide()
+					searchTableData = searchTableData[:0]
+					searchTable.Refresh()
+					searchTableContainer.Hide()
+					searchStatusContainer.Show()
+					searchResultStack.Refresh()
+					return
+				}
+
+				searchTableData = append(searchTableData[:0], results...)
+				lastSearchResults = append(lastSearchResults[:0], results...)
+				if len(searchTableData) == 0 {
+					safeSet(searchBinding, "No catalog listings returned. Try another keyword.")
+					searchControls.Hide()
+					searchTableContainer.Hide()
+					searchStatusContainer.Show()
+					searchResultStack.Refresh()
+					return
+				}
+
+				searchControls.Show()
+				searchControls.Refresh()
+				searchTableContainer.Show()
+				searchTable.Refresh()
+				searchStatusContainer.Hide()
+				searchResultStack.Refresh()
+				safeSet(searchBinding, fmt.Sprintf("Found %d listing(s). Use the export controls for deeper analysis.", len(searchTableData)))
+			})
+		}()
+	}
+
+	searchEntry.OnSubmitted = func(string) {
+		fetchSearch()
+	}
+
 	form := widget.NewForm(
 		widget.NewFormItem("ASIN", asinEntry),
 		widget.NewFormItem("Marketplace", countrySelect),
 	)
 	form.SubmitText = "Fetch Product"
-	form.OnSubmit = fetch
+	form.OnSubmit = fetchProduct
+
+	searchForm := widget.NewForm(
+		widget.NewFormItem("Keyword", searchEntry),
+		widget.NewFormItem("Format", searchFormatSelect),
+		widget.NewFormItem("Max Results", maxResultsEntry),
+	)
+	searchForm.SubmitText = "Search Catalog"
+	searchForm.OnSubmit = func() {
+		fetchSearch()
+	}
 
 	content := container.NewVBox(
 		form,
@@ -366,6 +631,11 @@ func buildProductLookupTab(window fyne.Window, service *scraper.Service, countri
 		controlRow,
 		widget.NewSeparator(),
 		newResultScroll(container.NewPadded(productCards)),
+		widget.NewSeparator(),
+		widget.NewLabelWithStyle("Catalog Search", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		searchForm,
+		searchControls,
+		newResultScroll(searchResultStack),
 	)
 
 	return content
@@ -2029,6 +2299,29 @@ func exportProductCSV(window fyne.Window, details *scraper.ProductDetails) {
 	}, [][]string{row})
 }
 
+func exportSearchCSV(window fyne.Window, results []scraper.SearchResult) {
+	if len(results) == 0 {
+		return
+	}
+
+	rows := make([][]string, 0, len(results))
+	for _, result := range results {
+		rows = append(rows, []string{
+			strconv.Itoa(result.Rank),
+			result.ASIN,
+			result.Title,
+			result.Author,
+			result.Price,
+			result.Rating,
+			result.ReviewCount,
+			result.BestSellerRank,
+			result.URL,
+		})
+	}
+
+	exportCSV(window, "catalog-search.csv", []string{"Rank", "ASIN", "Title", "Author", "Price", "Rating", "Reviews", "BestSellerRank", "URL"}, rows)
+}
+
 func exportKeywordCSV(window fyne.Window, insights []scraper.KeywordInsight) {
 	if len(insights) == 0 {
 		return
@@ -2144,6 +2437,35 @@ func isValidASIN(asin string) bool {
 		}
 	}
 	return true
+}
+
+func formatSearchResults(results []scraper.SearchResult) string {
+	if len(results) == 0 {
+		return "No catalog listings returned. Try another keyword."
+	}
+
+	builder := &strings.Builder{}
+	for _, result := range results {
+		fmt.Fprintf(builder, "#%d %s (%s)\n", result.Rank, fallback(result.Title, "Untitled"), strings.ToUpper(fallback(result.ASIN, "N/A")))
+		if result.Author != "" {
+			fmt.Fprintf(builder, "   Author: %s\n", result.Author)
+		}
+		if result.Price != "" {
+			fmt.Fprintf(builder, "   Price: %s\n", result.Price)
+		}
+		if result.Rating != "" || result.ReviewCount != "" {
+			fmt.Fprintf(builder, "   Rating: %s (%s reviews)\n", fallback(result.Rating, "N/A"), fallback(result.ReviewCount, "0"))
+		}
+		if result.BestSellerRank != "" {
+			fmt.Fprintf(builder, "   Rank: %s\n", result.BestSellerRank)
+		}
+		if result.URL != "" {
+			fmt.Fprintf(builder, "   URL: %s\n", result.URL)
+		}
+		builder.WriteString("\n")
+	}
+
+	return strings.TrimSpace(builder.String())
 }
 
 func formatProductDetails(details *scraper.ProductDetails) string {

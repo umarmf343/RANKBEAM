@@ -199,6 +199,55 @@ func synthesizeBestsellers(keyword, country string) []BestsellerProduct {
 	return products
 }
 
+func synthesizeSearchResults(keyword, country string, limit int) []SearchResult {
+	cfg := ConfigFor(country)
+	keyword = strings.TrimSpace(keyword)
+	if keyword == "" {
+		keyword = "amazon publishing"
+	}
+	if limit <= 0 {
+		limit = 10
+	}
+	if limit > 25 {
+		limit = 25
+	}
+
+	results := make([]SearchResult, 0, limit)
+	words := strings.Fields(keyword)
+
+	for i := 0; i < limit; i++ {
+		adjective := headlineAdjectives[i%len(headlineAdjectives)]
+		noun := headlineNouns[(i+3)%len(headlineNouns)]
+		title := fmt.Sprintf("%s %s: %s", adjective, noun, titleize(keyword))
+		first := "Indie"
+		if len(words) > 0 {
+			first = titleize(words[i%len(words)])
+		}
+		last := titleize(fmt.Sprintf("Author%d", i+1))
+		author := fmt.Sprintf("%s %s", first, last)
+		price := formatPrice(cfg.Currency, 7.49+float64(i)*0.55+stableFloat(fmt.Sprintf("price-search-%d-%s", i, keyword))*4.2)
+		rating := 4.0 + stableFloat(fmt.Sprintf("rating-search-%d-%s", i, keyword))*0.9
+		reviews := 180 + int(stableFloat(fmt.Sprintf("reviews-search-%d-%s", i, keyword))*2800)
+		bestseller := 400 + i*33 + int(stableFloat(fmt.Sprintf("bsr-search-%d-%s", i, keyword))*180)
+		asin := fmt.Sprintf("OFFLINE%05d", i+1)
+		url := fmt.Sprintf("https://%s/dp/%s", cfg.Host, asin)
+
+		results = append(results, SearchResult{
+			Rank:           i + 1,
+			Title:          title,
+			Author:         author,
+			Price:          price,
+			Rating:         fmt.Sprintf("%.1f out of 5 stars", rating),
+			ReviewCount:    fmt.Sprintf("%s ratings", humanizeNumber(reviews)),
+			BestSellerRank: fmt.Sprintf("#%d in %s", bestseller, categoryFallbacks[i%len(categoryFallbacks)]),
+			URL:            url,
+			ASIN:           asin,
+		})
+	}
+
+	return results
+}
+
 func synthesizeInternationalKeywords(keyword string, countries []string) []InternationalKeyword {
 	if len(countries) == 0 {
 		countries = Countries()
