@@ -675,6 +675,7 @@ func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, count
 	keywordTableContainer := container.NewPadded(keywordTable)
 	keywordTableContainer.Hide()
 	keywordStatusContainer := container.NewPadded(keywordLabel)
+	keywordResultStack := container.NewStack(keywordTableContainer, keywordStatusContainer)
 
 	categoryControls := container.NewHBox()
 	categoryControls.Hide()
@@ -756,6 +757,7 @@ func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, count
 		keywordControls.Hide()
 		keywordTableContainer.Hide()
 		keywordStatusContainer.Show()
+		keywordResultStack.Refresh()
 		keywordTableData = keywordTableData[:0]
 		keywordTable.Refresh()
 
@@ -790,6 +792,7 @@ func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, count
 					keywordTableContainer.Hide()
 					keywordTable.Refresh()
 					keywordStatusContainer.Show()
+					keywordResultStack.Refresh()
 					return
 				}
 				keywordTableData = append(keywordTableData[:0], insights...)
@@ -800,6 +803,7 @@ func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, count
 				keywordTableContainer.Show()
 				keywordTable.Refresh()
 				keywordStatusContainer.Hide()
+				keywordResultStack.Refresh()
 				safeSet(keywordResult, keywordSummaryMessage(len(keywordTableData)))
 			})
 		}()
@@ -1003,8 +1007,7 @@ func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, count
 	keywordTabContent := newResultScroll(container.NewVBox(
 		keywordHeader,
 		widget.NewSeparator(),
-		keywordTableContainer,
-		keywordStatusContainer,
+		keywordResultStack,
 	))
 
 	categoryTabContent := newResultScroll(container.NewVBox(
