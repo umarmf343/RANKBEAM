@@ -105,7 +105,7 @@ Each result panel scrolls independently so you can review long reports without l
 ### 5.4 International Keyword Expansion
 
 1. Enter a base keyword.
-2. Tick the marketplaces you want to evaluate (a recommended default selection is pre-filled).
+2. Tick the marketplaces you want to evaluate (a recommended default selection is pre-filled, and now includes Austria for EU-focused launches).
 3. Click **Generate Suggestions** to produce localized keyword lists across the selected countries, enabling multi-market launch planning.
 
 ## 6. Exporting & Sharing Results
