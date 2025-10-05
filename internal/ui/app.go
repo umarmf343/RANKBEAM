@@ -577,9 +577,8 @@ func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, count
 		presetNameEntry.SetText("")
 	})
 
-	keywordChart := container.NewVBox(widget.NewLabel("Keyword suggestions will appear here."))
-
 	var lastKeywordInsights []scraper.KeywordInsight
+	keywordTableData := make([]scraper.KeywordInsight, 0)
 	var lastCategoryTrends []scraper.CategoryTrend
 	var lastBestsellers []scraper.BestsellerProduct
 
@@ -604,6 +603,78 @@ func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, count
 		exportKeywordCSV(window, lastKeywordInsights)
 	})
 	keywordControls.Objects = []fyne.CanvasObject{keywordCopy, keywordJSON, keywordCSV}
+
+	keywordTable := widget.NewTable(
+		func() (int, int) {
+			rows := len(keywordTableData)
+			if rows == 0 {
+				return 1, 5
+			}
+			return rows + 1, 5
+		},
+		func() fyne.CanvasObject {
+			label := widget.NewLabel("")
+			label.Alignment = fyne.TextAlignLeading
+			label.Wrapping = fyne.TextWrapOff
+			return label
+		},
+		func(id widget.TableCellID, object fyne.CanvasObject) {
+			label, _ := object.(*widget.Label)
+			if label == nil {
+				return
+			}
+
+			label.Alignment = fyne.TextAlignLeading
+			label.Wrapping = fyne.TextWrapOff
+			label.TextStyle = fyne.TextStyle{}
+
+			if id.Row == 0 {
+				headers := []string{"Keyword", "Search Volume", "Competition", "Relevancy", "Title Density"}
+				if id.Col < len(headers) {
+					text := headers[id.Col]
+					if id.Col > 1 {
+						label.Alignment = fyne.TextAlignCenter
+					}
+					label.TextStyle = fyne.TextStyle{Bold: true}
+					label.SetText(text)
+				}
+				return
+			}
+
+			if id.Row-1 >= len(keywordTableData) {
+				label.SetText("")
+				return
+			}
+
+			insight := keywordTableData[id.Row-1]
+			switch id.Col {
+			case 0:
+				label.Alignment = fyne.TextAlignLeading
+				label.SetText(insight.Keyword)
+			case 1:
+				label.Alignment = fyne.TextAlignCenter
+				label.SetText(fmt.Sprintf("%d", insight.SearchVolume))
+			case 2:
+				label.Alignment = fyne.TextAlignCenter
+				label.SetText(keywordCompetitionBadge(insight.CompetitionScore))
+			case 3:
+				label.Alignment = fyne.TextAlignCenter
+				label.SetText(fmt.Sprintf("%.0f%%", insight.RelevancyScore*100))
+			case 4:
+				label.Alignment = fyne.TextAlignCenter
+				label.SetText(keywordDensityBadge(insight.TitleDensity))
+			}
+		},
+	)
+	keywordTable.SetColumnWidth(0, 260)
+	keywordTable.SetColumnWidth(1, 130)
+	keywordTable.SetColumnWidth(2, 140)
+	keywordTable.SetColumnWidth(3, 130)
+	keywordTable.SetColumnWidth(4, 140)
+
+	keywordTableContainer := container.NewPadded(keywordTable)
+	keywordTableContainer.Hide()
+	keywordStatusContainer := container.NewPadded(keywordLabel)
 
 	categoryControls := container.NewHBox()
 	categoryControls.Hide()
@@ -649,7 +720,6 @@ func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, count
 	})
 	bestsellerControls.Objects = []fyne.CanvasObject{bestsellerCopy, bestsellerJSON, bestsellerCSV}
 
-	keywordInfoAction := newInfoButton(window, "Generates keyword ideas with volume, competition counts and relevancy scores from Amazon auto-complete data.")
 	categoryInfoAction := newInfoButton(window, "Highlights categories where the seed term is trending so you can position listings effectively.")
 	bestsellerInfoAction := newInfoButton(window, "Summarises top selling books for the keyword to benchmark pricing, reviews and rank metrics.")
 
@@ -682,6 +752,13 @@ func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, count
 		activity.Start()
 		quota.Use()
 
+		safeSet(keywordResult, fmt.Sprintf("Collecting ideas for \"%s\"…", searchSeed))
+		keywordControls.Hide()
+		keywordTableContainer.Hide()
+		keywordStatusContainer.Show()
+		keywordTableData = keywordTableData[:0]
+		keywordTable.Refresh()
+
 		ctx, cancel := context.WithTimeout(context.Background(), currentRequestTimeout())
 		progress := newCancelableProgress(window, "Keyword Research", fmt.Sprintf("Collecting ideas for \"%s\"…", searchSeed), cancel)
 		if progress != nil {
@@ -709,17 +786,27 @@ func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, count
 					safeSet(keywordResult, message)
 					lastKeywordInsights = nil
 					keywordControls.Hide()
-					keywordChart.Objects = []fyne.CanvasObject{widget.NewLabel("No keyword suggestions available yet.")}
-					keywordChart.Refresh()
+					keywordTableData = keywordTableData[:0]
+					keywordTableContainer.Hide()
+					keywordTable.Refresh()
+					keywordStatusContainer.Show()
 					return
 				}
-				lastKeywordInsights = insights
+				keywordTableData = append(keywordTableData[:0], insights...)
+				sortKeywordInsights(keywordTableData)
+				lastKeywordInsights = append(lastKeywordInsights[:0], keywordTableData...)
 				keywordControls.Show()
 				keywordControls.Refresh()
-				safeSet(keywordResult, formatKeywordInsights(insights))
-				updateKeywordChart(keywordChart, insights)
+				keywordTableContainer.Show()
+				keywordTable.Refresh()
+				keywordStatusContainer.Hide()
+				safeSet(keywordResult, keywordSummaryMessage(len(keywordTableData)))
 			})
 		}()
+	}
+
+	keywordEntry.OnSubmitted = func(string) {
+		fetchKeywords()
 	}
 
 	fetchCategories := func() {
@@ -838,34 +925,86 @@ func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, count
 		}()
 	}
 
-	keywordButton := widget.NewButton("Fetch Keyword Suggestions", fetchKeywords)
+	labeledField := func(label string, content fyne.CanvasObject) fyne.CanvasObject {
+		title := widget.NewLabelWithStyle(label, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+		return container.NewVBox(title, content)
+	}
+
+	newSearchButton := widget.NewButtonWithIcon("New Search", theme.SearchIcon(), func() {
+		fetchKeywords()
+	})
+	newSearchButton.Importance = widget.HighImportance
+
+	exportButton := widget.NewButtonWithIcon("Export", theme.DocumentIcon(), func() {
+		if len(lastKeywordInsights) == 0 {
+			dialog.ShowInformation("Export Keywords", "Run a keyword search before exporting results.", window)
+			return
+		}
+
+		var exportDialog dialog.Dialog
+		options := container.NewVBox(
+			widget.NewButtonWithIcon("Copy to Clipboard", theme.ContentCopyIcon(), func() {
+				copyToClipboard(window, formatKeywordInsights(lastKeywordInsights))
+				if exportDialog != nil {
+					exportDialog.Hide()
+				}
+			}),
+			widget.NewButtonWithIcon("Download JSON", theme.DocumentIcon(), func() {
+				exportJSON(window, "keywords.json", lastKeywordInsights)
+				if exportDialog != nil {
+					exportDialog.Hide()
+				}
+			}),
+			widget.NewButtonWithIcon("Download CSV", theme.DocumentIcon(), func() {
+				exportKeywordCSV(window, lastKeywordInsights)
+				if exportDialog != nil {
+					exportDialog.Hide()
+				}
+			}),
+		)
+
+		exportDialog = dialog.NewCustomWithoutButtons("Export Keywords", options, window)
+		exportDialog.Show()
+	})
+
+	searchBar := container.NewAdaptiveGridWithColumns(4,
+		labeledField("Seed Keyword", keywordEntry),
+		labeledField("Marketplace", countrySelect),
+		labeledField("Format", formatSelect),
+		container.NewVBox(widget.NewLabel(" "), container.NewHBox(newSearchButton, exportButton)),
+	)
+
+	keywordFilters := container.NewAdaptiveGridWithColumns(3,
+		labeledField("Minimum Volume", minVolumeEntry),
+		labeledField("Max Competition", maxCompetitionEntry),
+		labeledField("Max Title Density", maxDensityEntry),
+	)
+
+	bestsellerFilters := container.NewAdaptiveGridWithColumns(2,
+		labeledField("Max Bestseller Rank", maxRankEntry),
+		container.NewVBox(widget.NewLabelWithStyle("Options", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), indieOnlyCheck),
+	)
+
 	categoryButton := widget.NewButton("Category Insights", fetchCategories)
 	bestsellerButton := widget.NewButton("Bestseller Snapshot", fetchBestsellers)
 
-	actionGrid := container.NewGridWithColumns(3,
-		container.NewHBox(keywordButton, keywordInfoAction),
+	actionGrid := container.NewAdaptiveGridWithColumns(2,
 		container.NewHBox(categoryButton, categoryInfoAction),
 		container.NewHBox(bestsellerButton, bestsellerInfoAction),
 	)
 
-	advancedFilters := widget.NewAccordion(
-		widget.NewAccordionItem("Keyword Filters", container.NewVBox(
-			widget.NewLabel("Fine-tune search suggestions"),
-			container.NewGridWithColumns(3, minVolumeEntry, maxCompetitionEntry, maxDensityEntry),
-		)),
-		widget.NewAccordionItem("Bestseller Filters", container.NewVBox(
-			widget.NewLabel("Limit bestseller results"),
-			container.NewGridWithColumns(2, maxRankEntry, indieOnlyCheck),
-		)),
+	keywordHeader := container.NewHBox(
+		widget.NewLabelWithStyle("Keyword Suggestions", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		keywordInfoHeader,
+		layout.NewSpacer(),
+		keywordControls,
 	)
-	advancedFilters.MultiOpen = true
 
 	keywordTabContent := newResultScroll(container.NewVBox(
-		container.NewHBox(widget.NewLabelWithStyle("Keyword Suggestions", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), layout.NewSpacer(), keywordInfoHeader),
-		keywordControls,
-		keywordChart,
+		keywordHeader,
 		widget.NewSeparator(),
-		keywordLabel,
+		keywordTableContainer,
+		keywordStatusContainer,
 	))
 
 	categoryTabContent := newResultScroll(container.NewVBox(
@@ -930,9 +1069,11 @@ func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, count
 	form.OnSubmit = fetchKeywords
 
 	mainContent := container.NewVBox(
-		widget.NewLabelWithStyle("Keyword Research Toolkit", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		form,
-		advancedFilters,
+		widget.NewLabelWithStyle("Keyword Research", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		container.NewPadded(searchBar),
+		widget.NewSeparator(),
+		container.NewPadded(keywordFilters),
+		container.NewPadded(bestsellerFilters),
 		widget.NewSeparator(),
 		actionGrid,
 		widget.NewSeparator(),
@@ -1602,63 +1743,61 @@ func buildProductCards(details *scraper.ProductDetails) []fyne.CanvasObject {
 	return cards
 }
 
-func updateKeywordChart(chart *fyne.Container, insights []scraper.KeywordInsight) {
-	if chart == nil {
-		return
+func keywordCompetitionBadge(score float64) string {
+	scaled := int(math.Round(score * 10))
+	if scaled < 0 {
+		scaled = 0
+	}
+	if scaled > 100 {
+		scaled = 100
 	}
 
-	chart.Objects = nil
-	if len(insights) == 0 {
-		chart.Add(widget.NewLabel("No keyword suggestions available yet."))
-		chart.Refresh()
-		return
+	switch {
+	case scaled <= 30:
+		return fmt.Sprintf("🟢 %d", scaled)
+	case scaled <= 60:
+		return fmt.Sprintf("🟡 %d", scaled)
+	default:
+		return fmt.Sprintf("🔴 %d", scaled)
+	}
+}
+
+func keywordDensityBadge(density float64) string {
+	value := int(math.Round(density))
+	if value < 0 {
+		value = 0
+	}
+	if value > 10 {
+		value = 10
 	}
 
-	cloned := append([]scraper.KeywordInsight(nil), insights...)
-	sort.SliceStable(cloned, func(i, j int) bool {
-		if cloned[i].SearchVolume == cloned[j].SearchVolume {
-			return cloned[i].Keyword < cloned[j].Keyword
+	switch {
+	case value <= 3:
+		return fmt.Sprintf("🟢 %d", value)
+	case value <= 6:
+		return fmt.Sprintf("🟡 %d", value)
+	default:
+		return fmt.Sprintf("🔴 %d", value)
+	}
+}
+
+func keywordSummaryMessage(total int) string {
+	if total <= 0 {
+		return "No keyword suggestions available yet."
+	}
+	if total == 1 {
+		return "1 keyword suggestion ready."
+	}
+	return fmt.Sprintf("%d keyword suggestions ready.", total)
+}
+
+func sortKeywordInsights(insights []scraper.KeywordInsight) {
+	sort.SliceStable(insights, func(i, j int) bool {
+		if insights[i].SearchVolume == insights[j].SearchVolume {
+			return strings.ToLower(insights[i].Keyword) < strings.ToLower(insights[j].Keyword)
 		}
-		return cloned[i].SearchVolume > cloned[j].SearchVolume
+		return insights[i].SearchVolume > insights[j].SearchVolume
 	})
-
-	limit := len(cloned)
-	if limit > 15 {
-		limit = 15
-	}
-	maxVolume := cloned[0].SearchVolume
-	if maxVolume <= 0 {
-		maxVolume = 1
-	}
-
-	baseWidth := float32(280)
-	for index := 0; index < limit; index++ {
-		insight := cloned[index]
-		ratio := float32(insight.SearchVolume) / float32(maxVolume)
-		width := baseWidth * ratio
-		if width < 6 {
-			width = 6
-		}
-
-		bar := canvas.NewRectangle(theme.PrimaryColor())
-		bar.SetMinSize(fyne.NewSize(width, 12))
-		bar.CornerRadius = 6
-
-		background := canvas.NewRectangle(theme.DisabledColor())
-		background.SetMinSize(fyne.NewSize(baseWidth, 12))
-		background.CornerRadius = 6
-
-		chart.Add(container.NewVBox(
-			container.NewHBox(
-				widget.NewLabel(fmt.Sprintf("%d. %s", index+1, insight.Keyword)),
-				layout.NewSpacer(),
-				widget.NewLabel(fmt.Sprintf("%d", insight.SearchVolume)),
-			),
-			container.NewMax(background, bar),
-			widget.NewLabel(fmt.Sprintf("Competition %s • Relevancy %.2f • Title Density %s", formatCount(insight.CompetitionScore), insight.RelevancyScore, formatCount(insight.TitleDensity))),
-		))
-	}
-	chart.Refresh()
 }
 
 func newInfoButton(window fyne.Window, tooltip string) *widget.Button {
