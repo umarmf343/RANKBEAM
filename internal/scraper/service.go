@@ -234,6 +234,150 @@ func (s *Service) FetchProduct(ctx context.Context, asin, country string) (*Prod
 	}, nil
 }
 
+// SearchProducts scrapes Amazon search result pages for catalog information.
+func (s *Service) SearchProducts(ctx context.Context, keyword, country, alias string, maxResults int) ([]SearchResult, error) {
+	keyword = strings.TrimSpace(keyword)
+	if keyword == "" {
+		return nil, errors.New("keyword is required")
+	}
+
+	if maxResults <= 0 {
+		maxResults = 15
+	}
+	if maxResults > 50 {
+		maxResults = 50
+	}
+
+	if strings.TrimSpace(alias) == "" {
+		alias = "stripbooks"
+	}
+
+	cfg := ConfigFor(strings.ToUpper(country))
+	endpoint := fmt.Sprintf("https://%s/s", cfg.Host)
+
+	params := url.Values{}
+	params.Set("k", keyword)
+	params.Set("i", alias)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+"?"+params.Encode(), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", s.userAgent())
+	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
+
+	if err := s.waitForRate(ctx); err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil, err
+		}
+		logging.Logger().Warn("rate limiter interrupted product search, using fallback", "keyword", keyword, "country", country, "error", err)
+		return synthesizeSearchResults(keyword, country, maxResults), nil
+	}
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		logging.Logger().Warn("product search request failed, using fallback", "keyword", keyword, "country", country, "error", err)
+		return synthesizeSearchResults(keyword, country, maxResults), nil
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		logging.Logger().Warn("product search request returned non-OK status", "keyword", keyword, "country", country, "status", resp.StatusCode)
+		return synthesizeSearchResults(keyword, country, maxResults), nil
+	}
+
+	doc, err := goquery.NewDocumentFromReader(resp.Body)
+	if err != nil {
+		logging.Logger().Warn("unable to parse product search page, using fallback", "keyword", keyword, "country", country, "error", err)
+		return synthesizeSearchResults(keyword, country, maxResults), nil
+	}
+	if err := detectBotChallenge(doc); err != nil {
+		logging.Logger().Warn("bot challenge detected during product search", "keyword", keyword, "country", country, "error", err)
+		return synthesizeSearchResults(keyword, country, maxResults), nil
+	}
+
+	results := make([]SearchResult, 0, maxResults)
+	doc.Find("div.s-main-slot div[data-component-type='s-search-result']").EachWithBreak(func(i int, selection *goquery.Selection) bool {
+		if len(results) >= maxResults {
+			return false
+		}
+
+		title := strings.TrimSpace(selection.Find("h2 span").First().Text())
+		if title == "" {
+			return true
+		}
+
+		asin := strings.TrimSpace(selection.AttrOr("data-asin", ""))
+		href := strings.TrimSpace(selection.Find("h2 a").AttrOr("href", ""))
+		author := parseSearchResultAuthor(selection)
+		price := parseSearchResultPrice(selection, cfg.Currency)
+		rating := strings.TrimSpace(selection.Find("span.a-icon-alt").First().Text())
+		reviews := parseSearchResultReviews(selection)
+
+		results = append(results, SearchResult{
+			Rank:        len(results) + 1,
+			Title:       title,
+			Author:      author,
+			Price:       price,
+			Rating:      rating,
+			ReviewCount: reviews,
+			URL:         normalizeAmazonURL(cfg.Host, href),
+			ASIN:        asin,
+		})
+
+		return true
+	})
+
+	if len(results) == 0 {
+		logging.Logger().Info("product search returned no results, using fallback", "keyword", keyword, "country", country)
+		return synthesizeSearchResults(keyword, country, maxResults), nil
+	}
+
+	detailLimit := len(results)
+	if detailLimit > 5 {
+		detailLimit = 5
+	}
+
+	for i := 0; i < detailLimit; i++ {
+		if ctx.Err() != nil {
+			break
+		}
+
+		asin := strings.TrimSpace(results[i].ASIN)
+		if asin == "" {
+			continue
+		}
+
+		detailCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+		detail, err := s.FetchProduct(detailCtx, asin, country)
+		cancel()
+		if err != nil {
+			continue
+		}
+
+		if results[i].Price == "" && strings.TrimSpace(detail.Price) != "" {
+			results[i].Price = detail.Price
+		}
+		if results[i].Rating == "" && strings.TrimSpace(detail.Rating) != "" {
+			results[i].Rating = detail.Rating
+		}
+		if results[i].ReviewCount == "" && strings.TrimSpace(detail.ReviewCount) != "" {
+			results[i].ReviewCount = detail.ReviewCount
+		}
+		if results[i].URL == "" && strings.TrimSpace(detail.URL) != "" {
+			results[i].URL = detail.URL
+		}
+		if len(detail.BestSellerRanks) > 0 {
+			top := detail.BestSellerRanks[0]
+			if top.Rank > 0 && strings.TrimSpace(top.Category) != "" {
+				results[i].BestSellerRank = fmt.Sprintf("#%d in %s", top.Rank, strings.TrimSpace(top.Category))
+			}
+		}
+	}
+
+	return results, nil
+}
+
 // KeywordSuggestions retrieves suggestion keywords for a provided seed term. The method relies on
 // Amazon's public completion endpoint and augments the data with heuristic scores.
 type keywordSuggestionResponse struct {
@@ -1308,4 +1452,98 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func normalizeSearchText(value string) string {
+	if value == "" {
+		return ""
+	}
+	cleaned := strings.ReplaceAll(value, "\n", " ")
+	cleaned = strings.ReplaceAll(cleaned, "\t", " ")
+	cleaned = strings.ReplaceAll(cleaned, "\u00a0", " ")
+	cleaned = strings.ReplaceAll(cleaned, "\u200f", "")
+	cleaned = strings.ReplaceAll(cleaned, "\u200e", "")
+	fields := strings.Fields(cleaned)
+	return strings.Join(fields, " ")
+}
+
+func parseSearchResultAuthor(sel *goquery.Selection) string {
+	if sel == nil {
+		return ""
+	}
+
+	author := ""
+	sel.Find("div.a-row.a-size-base.a-color-secondary").EachWithBreak(func(i int, row *goquery.Selection) bool {
+		text := normalizeSearchText(row.Text())
+		if text == "" {
+			return true
+		}
+		lowered := strings.ToLower(text)
+		if strings.HasPrefix(lowered, "by ") {
+			text = strings.TrimSpace(text[3:])
+		}
+		if text != "" {
+			author = text
+			return false
+		}
+		return true
+	})
+
+	if author == "" {
+		author = normalizeSearchText(sel.Find("span.a-size-base-plus.a-color-base").First().Text())
+	}
+
+	return author
+}
+
+func parseSearchResultPrice(sel *goquery.Selection, currency string) string {
+	if sel == nil {
+		return ""
+	}
+
+	price := strings.TrimSpace(sel.Find("span.a-price span.a-offscreen").First().Text())
+	if price != "" {
+		return price
+	}
+
+	whole := strings.TrimSpace(sel.Find("span.a-price-whole").First().Text())
+	fraction := strings.TrimSpace(sel.Find("span.a-price-fraction").First().Text())
+	if whole == "" {
+		return ""
+	}
+
+	symbol := currencySymbol(currency)
+	if fraction != "" {
+		return strings.TrimSpace(fmt.Sprintf("%s%s.%s", symbol, whole, fraction))
+	}
+	return strings.TrimSpace(fmt.Sprintf("%s%s", symbol, whole))
+}
+
+func parseSearchResultReviews(sel *goquery.Selection) string {
+	if sel == nil {
+		return ""
+	}
+
+	return firstNonEmpty(
+		strings.TrimSpace(sel.Find("span[aria-label$='ratings']").First().Text()),
+		strings.TrimSpace(sel.Find("span[aria-label$='rating']").First().Text()),
+		strings.TrimSpace(sel.Find("span.a-size-base.s-underline-text").First().Text()),
+	)
+}
+
+func normalizeAmazonURL(host, href string) string {
+	href = strings.TrimSpace(href)
+	if href == "" {
+		return ""
+	}
+	if strings.HasPrefix(href, "http://") || strings.HasPrefix(href, "https://") {
+		return href
+	}
+	if !strings.HasPrefix(href, "/") {
+		href = "/" + href
+	}
+	if strings.TrimSpace(host) == "" {
+		host = "www.amazon.com"
+	}
+	return fmt.Sprintf("https://%s%s", host, href)
 }

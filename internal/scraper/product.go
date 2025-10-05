@@ -51,6 +51,19 @@ type BestsellerProduct struct {
 	URL          string
 }
 
+// SearchResult represents a single product extracted from an Amazon search page.
+type SearchResult struct {
+	Rank           int
+	Title          string
+	Author         string
+	Price          string
+	Rating         string
+	ReviewCount    string
+	BestSellerRank string
+	URL            string
+	ASIN           string
+}
+
 // KeywordInsight captures keyword research related metrics.
 type KeywordInsight struct {
 	Keyword          string

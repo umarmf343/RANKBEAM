@@ -25,6 +25,7 @@ var countryConfigs = map[string]CountryConfig{
 	"IN": {Country: "India", Currency: "INR", Host: "www.amazon.in", MarketplaceID: "A21TJRUUN4KGV"},
 	"JP": {Country: "Japan", Currency: "JPY", Host: "www.amazon.co.jp", MarketplaceID: "A1VC38T7YXB528"},
 	"AU": {Country: "Australia", Currency: "AUD", Host: "www.amazon.com.au", MarketplaceID: "A39IBJ37TRP1C6"},
+	"AT": {Country: "Austria", Currency: "EUR", Host: "www.amazon.at", MarketplaceID: "A1PA6795UKMFR9"},
 	"BR": {Country: "Brazil", Currency: "BRL", Host: "www.amazon.com.br", MarketplaceID: "A2Q3Y263D00KWC"},
 	"MX": {Country: "Mexico", Currency: "MXN", Host: "www.amazon.com.mx", MarketplaceID: "A1AM78C64UM0Y8"},
 	"AE": {Country: "United Arab Emirates", Currency: "AED", Host: "www.amazon.ae", MarketplaceID: "A2VIGQ35RCS4UG"},
