@@ -663,7 +663,7 @@ func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, count
 	minVolumeEntry := widget.NewEntry()
 	minVolumeEntry.SetPlaceHolder("0")
 	maxCompetitionEntry := widget.NewEntry()
-	maxCompetitionEntry.SetPlaceHolder("5")
+	maxCompetitionEntry.SetPlaceHolder("50")
 	maxDensityEntry := widget.NewEntry()
 	maxDensityEntry.SetPlaceHolder("100")
 
@@ -724,6 +724,7 @@ func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, count
 	indieOnlyCheck := widget.NewCheck("Indie authors only", nil)
 
 	keywordLabel := widget.NewLabelWithData(keywordResult)
+	keywordLabel.Alignment = fyne.TextAlignLeading
 	keywordLabel.Wrapping = fyne.TextWrapWord
 	categoryLabel := widget.NewLabelWithData(categoryResult)
 	categoryLabel.Wrapping = fyne.TextWrapWord
@@ -909,7 +910,7 @@ func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, count
 			label.TextStyle = fyne.TextStyle{}
 
 			if id.Row == 0 {
-				headers := []string{"Keyword", "Search Volume", "Competition", "Relevancy", "Title Density"}
+				headers := []string{"Keyword", "Search Volume", "Competition (Titles)", "Relevancy", "Title Density"}
 				if id.Col < len(headers) {
 					text := headers[id.Col]
 					if id.Col > 1 {
@@ -948,14 +949,58 @@ func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, count
 	)
 	keywordTable.SetColumnWidth(0, 260)
 	keywordTable.SetColumnWidth(1, 130)
-	keywordTable.SetColumnWidth(2, 140)
+	keywordTable.SetColumnWidth(2, 180)
 	keywordTable.SetColumnWidth(3, 130)
 	keywordTable.SetColumnWidth(4, 140)
 
 	keywordTableContainer := container.NewPadded(keywordTable)
-	keywordTableContainer.Hide()
-	keywordStatusContainer := container.NewPadded(keywordLabel)
-	keywordResultStack := container.NewStack(keywordTableContainer, keywordStatusContainer)
+
+	relatedList := widget.NewList(
+		func() int {
+			return len(keywordTableData)
+		},
+		func() fyne.CanvasObject {
+			title := widget.NewLabel("")
+			title.TextStyle = fyne.TextStyle{Bold: true}
+			title.Wrapping = fyne.TextWrapWord
+
+			meta := widget.NewLabel("")
+			meta.Wrapping = fyne.TextWrapWord
+			meta.TextStyle = fyne.TextStyle{Italic: true}
+
+			return container.NewVBox(title, meta)
+		},
+		func(id widget.ListItemID, item fyne.CanvasObject) {
+			if id < 0 || id >= len(keywordTableData) {
+				return
+			}
+			insight := keywordTableData[id]
+
+			box, ok := item.(*fyne.Container)
+			if !ok || len(box.Objects) < 2 {
+				return
+			}
+
+			title, _ := box.Objects[0].(*widget.Label)
+			meta, _ := box.Objects[1].(*widget.Label)
+			if title != nil {
+				title.SetText(insight.Keyword)
+			}
+			if meta != nil {
+				meta.SetText(describeKeywordInsight(insight))
+			}
+		},
+	)
+
+	relatedListContainer := container.NewPadded(relatedList)
+
+	keywordSummaryCard := widget.NewCard("Research Summary", "Live Amazon search data", container.NewPadded(keywordLabel))
+
+	keywordMetricsCard := widget.NewCard("Keyword Metrics", "Search volume, competition and relevancy", newResultScroll(keywordTableContainer))
+	relatedKeywordsCard := widget.NewCard("Related Keywords", "What shoppers also search", newResultScroll(relatedListContainer))
+
+	keywordResultsGrid := container.NewAdaptiveGrid(2, keywordMetricsCard, relatedKeywordsCard)
+	keywordResultsGrid.Hide()
 
 	categoryControls := container.NewHBox()
 	categoryControls.Hide()
@@ -1035,11 +1080,12 @@ func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, count
 
 		safeSet(keywordResult, fmt.Sprintf("Collecting ideas for \"%s\"…", searchSeed))
 		keywordControls.Hide()
-		keywordTableContainer.Hide()
-		keywordStatusContainer.Show()
-		keywordResultStack.Refresh()
+		keywordControls.Refresh()
 		keywordTableData = keywordTableData[:0]
 		keywordTable.Refresh()
+		relatedList.Refresh()
+		keywordResultsGrid.Hide()
+		keywordResultsGrid.Refresh()
 
 		ctx, cancel := context.WithTimeout(context.Background(), currentRequestTimeout())
 		progress := newCancelableProgress(window, "Keyword Research", fmt.Sprintf("Collecting ideas for \"%s\"…", searchSeed), cancel)
@@ -1068,22 +1114,31 @@ func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, count
 					safeSet(keywordResult, message)
 					lastKeywordInsights = nil
 					keywordControls.Hide()
+					keywordControls.Refresh()
 					keywordTableData = keywordTableData[:0]
-					keywordTableContainer.Hide()
 					keywordTable.Refresh()
-					keywordStatusContainer.Show()
-					keywordResultStack.Refresh()
+					relatedList.Refresh()
+					keywordResultsGrid.Hide()
+					keywordResultsGrid.Refresh()
 					return
 				}
 				keywordTableData = append(keywordTableData[:0], insights...)
 				sortKeywordInsights(keywordTableData)
 				lastKeywordInsights = append(lastKeywordInsights[:0], keywordTableData...)
+				keywordTable.Refresh()
+				relatedList.Refresh()
+				if len(keywordTableData) == 0 {
+					keywordControls.Hide()
+					keywordControls.Refresh()
+					keywordResultsGrid.Hide()
+					keywordResultsGrid.Refresh()
+					safeSet(keywordResult, "No keyword suggestions matched your filters.")
+					return
+				}
 				keywordControls.Show()
 				keywordControls.Refresh()
-				keywordTableContainer.Show()
-				keywordTable.Refresh()
-				keywordStatusContainer.Hide()
-				keywordResultStack.Refresh()
+				keywordResultsGrid.Show()
+				keywordResultsGrid.Refresh()
 				safeSet(keywordResult, keywordSummaryMessage(len(keywordTableData)))
 			})
 		}()
@@ -1287,7 +1342,8 @@ func buildKeywordResearchTab(window fyne.Window, service *scraper.Service, count
 	keywordTabContent := newResultScroll(container.NewVBox(
 		keywordHeader,
 		widget.NewSeparator(),
-		keywordResultStack,
+		keywordSummaryCard,
+		keywordResultsGrid,
 	))
 
 	categoryTabContent := newResultScroll(container.NewVBox(
@@ -2027,21 +2083,18 @@ func buildProductCards(details *scraper.ProductDetails) []fyne.CanvasObject {
 }
 
 func keywordCompetitionBadge(score float64) string {
-	scaled := int(math.Round(score * 10))
-	if scaled < 0 {
-		scaled = 0
-	}
-	if scaled > 100 {
-		scaled = 100
+	if score < 0 {
+		return "—"
 	}
 
+	count := int(math.Round(score))
 	switch {
-	case scaled <= 30:
-		return fmt.Sprintf("🟢 %d", scaled)
-	case scaled <= 60:
-		return fmt.Sprintf("🟡 %d", scaled)
+	case count <= 50:
+		return fmt.Sprintf("🟢 Competition %d", count)
+	case count <= 150:
+		return fmt.Sprintf("🟡 Competition %d", count)
 	default:
-		return fmt.Sprintf("🔴 %d", scaled)
+		return fmt.Sprintf("🔴 Competition %d", count)
 	}
 }
 
@@ -2064,14 +2117,40 @@ func keywordDensityBadge(density float64) string {
 	}
 }
 
+func describeKeywordInsight(insight scraper.KeywordInsight) string {
+	parts := make([]string, 0, 4)
+
+	if insight.SearchVolume > 0 {
+		parts = append(parts, fmt.Sprintf("Volume %d", insight.SearchVolume))
+	}
+
+	if competition := formatCount(insight.CompetitionScore); competition != "" {
+		parts = append(parts, fmt.Sprintf("Competition %s titles", competition))
+	}
+
+	if insight.RelevancyScore > 0 {
+		parts = append(parts, fmt.Sprintf("Relevancy %.0f%%", insight.RelevancyScore*100))
+	}
+
+	if density := formatCount(insight.TitleDensity); density != "" {
+		parts = append(parts, fmt.Sprintf("Title density %s titles", density))
+	}
+
+	if len(parts) == 0 {
+		return "Live Amazon search data"
+	}
+
+	return strings.Join(parts, " • ")
+}
+
 func keywordSummaryMessage(total int) string {
 	if total <= 0 {
 		return "No keyword suggestions available yet."
 	}
 	if total == 1 {
-		return "1 keyword suggestion ready."
+		return "1 keyword suggestion ready. Competition totals reflect live Amazon titles."
 	}
-	return fmt.Sprintf("%d keyword suggestions ready.", total)
+	return fmt.Sprintf("%d keyword suggestions ready. Competition totals reflect live Amazon titles.", total)
 }
 
 func sortKeywordInsights(insights []scraper.KeywordInsight) {
