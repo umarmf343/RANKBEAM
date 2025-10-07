@@ -249,7 +249,7 @@ func (s *Service) KeywordSuggestions(ctx context.Context, keyword, country strin
 
 	alias := strings.TrimSpace(filters.SearchAlias)
 	if alias == "" {
-		alias = "stripbooks"
+		alias = "aps"
 	}
 
 	params := url.Values{}
