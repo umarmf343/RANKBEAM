@@ -1744,21 +1744,19 @@ func buildProductCards(details *scraper.ProductDetails) []fyne.CanvasObject {
 }
 
 func keywordCompetitionBadge(score float64) string {
-	scaled := int(math.Round(score * 10))
-	if scaled < 0 {
-		scaled = 0
-	}
-	if scaled > 100 {
-		scaled = 100
+	rounded := int(math.Round(score))
+	if rounded < 0 {
+		rounded = 0
 	}
 
+	value := formatCount(float64(rounded))
 	switch {
-	case scaled <= 30:
-		return fmt.Sprintf("🟢 %d", scaled)
-	case scaled <= 60:
-		return fmt.Sprintf("🟡 %d", scaled)
+	case rounded <= 100:
+		return fmt.Sprintf("🟢 %s", value)
+	case rounded <= 400:
+		return fmt.Sprintf("🟡 %s", value)
 	default:
-		return fmt.Sprintf("🔴 %d", scaled)
+		return fmt.Sprintf("🔴 %s", value)
 	}
 }
 
