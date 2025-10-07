@@ -35,7 +35,75 @@ var (
 	ErrServiceClosed     = errors.New("scraper service closed")
 	ErrBotDetected       = errors.New("amazon requested captcha verification")
 	bsrPattern           = regexp.MustCompile(`#([0-9,]+)\s+in\s+([^()\n>]+)`)
-	resultsNumberPattern = regexp.MustCompile(`\d[\d,.]*`)
+	resultsNumberPattern = regexp.MustCompile(`\d[\d.,\s\u00a0\u202f]*`)
+	searchResultKeywords = []string{
+		"result",
+		"ergeb",
+		"résultat",
+		"résult",
+		"risultat",
+		"resultado",
+		"resultat",
+		"wynik",
+		"rezultat",
+		"rezultate",
+		"sonuç",
+		"결과",
+		"結果",
+		"结果",
+		"результат",
+	}
+	searchResultConnectorTokens = []string{
+		" of ",
+		"of ",
+		" of",
+		" von ",
+		"von ",
+		" von",
+		" di ",
+		"di ",
+		" di",
+		" de ",
+		"de ",
+		" de",
+		" des ",
+		"des ",
+		" des",
+		" del ",
+		"del ",
+		" del",
+		" sur ",
+		"sur ",
+		" sur",
+		" sobre ",
+		"sobre ",
+		" sobre",
+		" su ",
+		"su ",
+		" su",
+		" en ",
+		"en ",
+		" en",
+		" más de ",
+		"más de ",
+		" más de",
+		" mais de ",
+		"mais de ",
+		" mais de",
+		" più di ",
+		"più di ",
+		" più di",
+		" oltre ",
+		"oltre ",
+		" oltre",
+		" über ",
+		"über ",
+		" über",
+		"以上",
+		"超过",
+		"超過",
+		"超える",
+	}
 )
 
 // NewService creates a scraper service with sane defaults such as timeout handling,
@@ -914,7 +982,9 @@ func extractSearchResultCount(doc *goquery.Document) int {
 
 func parseSearchResultCountFromText(text string) int {
 	lowered := strings.ToLower(text)
-	if !strings.Contains(lowered, "result") {
+	normalized := strings.NewReplacer("\u00a0", " ", "\u202f", " ").Replace(lowered)
+
+	if !containsSearchResultKeyword(normalized) {
 		return -1
 	}
 
@@ -923,12 +993,14 @@ func parseSearchResultCountFromText(text string) int {
 		return -1
 	}
 
-	if idx := strings.Index(lowered, "of"); idx >= 0 {
-		after := text[idx:]
-		afterNumbers := resultsNumberPattern.FindAllString(after, -1)
-		for _, candidate := range afterNumbers {
-			if value := parseNumericCandidate(candidate); value > 0 {
-				return value
+	for _, connector := range searchResultConnectorTokens {
+		if idx := strings.Index(normalized, connector); idx >= 0 {
+			after := text[idx+len(connector):]
+			afterNumbers := resultsNumberPattern.FindAllString(after, -1)
+			for _, candidate := range afterNumbers {
+				if value := parseNumericCandidate(candidate); value > 0 {
+					return value
+				}
 			}
 		}
 	}
@@ -943,13 +1015,22 @@ func parseSearchResultCountFromText(text string) int {
 }
 
 func parseNumericCandidate(token string) int {
-	cleaned := strings.ReplaceAll(token, ",", "")
-	cleaned = strings.ReplaceAll(cleaned, ".", "")
+	replacer := strings.NewReplacer(",", "", ".", "", " ", "", "\u00a0", "", "\u202f", "")
+	cleaned := replacer.Replace(token)
 	value, err := strconv.Atoi(cleaned)
 	if err != nil {
 		return -1
 	}
 	return value
+}
+
+func containsSearchResultKeyword(text string) bool {
+	for _, keyword := range searchResultKeywords {
+		if strings.Contains(text, keyword) {
+			return true
+		}
+	}
+	return false
 }
 
 func parsePublisher(doc *goquery.Document) string {
