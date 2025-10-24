@@ -27,6 +27,8 @@ npm install
 npm run dev
 ```
 
+If you skip the install step, running `npm run dev` now bootstraps dependencies automatically before starting Vite.
+
 The Vite server starts on port `5173` by default. Visit `http://localhost:5173` to explore the RankBeam experience.
 
 ## Available scripts
