@@ -41,9 +41,10 @@ function keywordApiPlugin(): Plugin {
           res.end(JSON.stringify(response));
         } catch (error) {
           console.error("Keyword API error", error);
-          res.statusCode = 500;
+          const message = error instanceof Error ? error.message : "Failed to retrieve keyword intelligence";
+          res.statusCode = message === "Seed keyword is required" ? 400 : 502;
           res.setHeader("Content-Type", "application/json");
-          res.end(JSON.stringify({ error: "Failed to retrieve keyword intelligence" }));
+          res.end(JSON.stringify({ error: message }));
         }
       });
     }

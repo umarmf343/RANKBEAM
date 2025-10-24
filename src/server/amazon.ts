@@ -1,13 +1,13 @@
 import { load } from "cheerio";
 import { resolveCountry } from "../data/countries";
 import type { KeywordInsight, CompetitorResult } from "../lib/keywordEngine";
-import { generateKeywordInsights, generateCompetitors, stableFloat } from "../lib/keywordEngine";
+import { generateCompetitors, stableFloat } from "../lib/keywordEngine";
 
 type ScrapeOutcome = {
   keywords: KeywordInsight[];
   competitors: CompetitorResult[];
   suggestedKeywords: string[];
-  source: "scraped" | "fallback";
+  source: "scraped";
 };
 
 type ParsedProduct = {
@@ -230,27 +230,16 @@ function generateVariants(seed: string): string[] {
   return Array.from(variants);
 }
 
-function fallbackFromSeed(seed: string, countryCode: string): ScrapeOutcome {
-  const variants = generateKeywordInsights(seed, 12);
-  const suggestions = variants.slice(1, 12).map((row: KeywordInsight) => row.keyword);
-  return {
-    keywords: variants,
-    competitors: generateCompetitors(seed, countryCode),
-    suggestedKeywords: suggestions,
-    source: "fallback"
-  };
-}
-
 export async function scrapeAmazonKeywordData(seed: string, countryCode: string): Promise<ScrapeOutcome> {
   const normalizedSeed = seed.trim();
   if (!normalizedSeed) {
-    return fallbackFromSeed("amazon publishing", countryCode);
+    throw new Error("Seed keyword is required");
   }
 
   const variants = generateVariants(normalizedSeed);
   const results: KeywordInsight[] = [];
   const scrapedCompetitors: CompetitorResult[] = [];
-  let scrapedAny = false;
+  const scrapeErrors: string[] = [];
 
   for (const variant of variants) {
     try {
@@ -260,15 +249,18 @@ export async function scrapeAmazonKeywordData(seed: string, countryCode: string)
         if (scrapedCompetitors.length === 0) {
           scrapedCompetitors.push(...buildCompetitors(outcome.products, countryCode));
         }
-        scrapedAny = true;
+      } else {
+        scrapeErrors.push(`${variant}: no products returned by Amazon`);
       }
     } catch (error) {
-      continue;
+      const message = error instanceof Error ? error.message : "Unknown scrape error";
+      scrapeErrors.push(`${variant}: ${message}`);
     }
   }
 
-  if (!scrapedAny || results.length === 0) {
-    return fallbackFromSeed(normalizedSeed, countryCode);
+  if (results.length === 0) {
+    const detail = scrapeErrors.length > 0 ? scrapeErrors.slice(0, 3).join("; ") : "Amazon returned no results";
+    throw new Error(`Unable to scrape Amazon results for \"${normalizedSeed}\": ${detail}`);
   }
 
   const decoratedRows = results.map((row, index) => {

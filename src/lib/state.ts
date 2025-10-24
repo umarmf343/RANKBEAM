@@ -11,8 +11,7 @@ import {
   generateCompetitors,
   generateGrowthSignals,
   generateHeadlineIdeas,
-  generateInternationalKeywords,
-  generateKeywordInsights
+  generateInternationalKeywords
 } from "@/lib/keywordEngine";
 import type { CountryConfig } from "@/data/countries";
 import { resolveCountry } from "@/data/countries";
@@ -29,8 +28,9 @@ export type RankBeamState = {
   headlineIdeas: string[];
   loading: boolean;
   suggestedKeywords: string[];
-  dataSource: "scraped" | "fallback";
+  dataSource: "scraped" | "error";
   lastUpdated?: string;
+  error?: string;
   updateKeyword: (keyword: string) => void;
   updateCountry: (countryCode: string) => void;
   refresh: () => void;
@@ -51,7 +51,8 @@ export const useRankBeamStore = create<RankBeamState>((set, get) => ({
   headlineIdeas: [],
   suggestedKeywords: [],
   loading: false,
-  dataSource: "fallback",
+  dataSource: "scraped",
+  error: undefined,
   updateKeyword: (keyword) => {
     set({ keyword });
     get().refresh();
@@ -92,26 +93,22 @@ export const useRankBeamStore = create<RankBeamState>((set, get) => ({
             suggestedKeywords: payload.suggestedKeywords,
             dataSource: payload.source,
             lastUpdated: payload.scrapedAt,
-            loading: false
+            loading: false,
+            error: undefined
           });
         } catch (error) {
-          const keywordInsights = generateKeywordInsights(currentKeyword);
-          const categoryTrends = generateCategoryTrends(currentKeyword);
-          const internationalKeywords = generateInternationalKeywords(currentKeyword);
-          const competitors = generateCompetitors(currentKeyword, currentCountry.code);
-          const growthSignals = generateGrowthSignals(currentKeyword);
-          const headlineIdeas = generateHeadlineIdeas(currentKeyword);
           set({
-            keywordInsights,
-            categoryTrends,
-            internationalKeywords,
-            competitors,
-            growthSignals,
-            headlineIdeas,
-            suggestedKeywords: keywordInsights.slice(1, 12).map((row) => row.keyword),
-            dataSource: "fallback",
-            lastUpdated: new Date().toISOString(),
-            loading: false
+            keywordInsights: [],
+            categoryTrends: [],
+            internationalKeywords: [],
+            competitors: [],
+            growthSignals: [],
+            headlineIdeas: [],
+            suggestedKeywords: [],
+            dataSource: "error",
+            lastUpdated: undefined,
+            loading: false,
+            error: error instanceof Error ? error.message : "Failed to retrieve keyword intelligence"
           });
         } finally {
           refreshHandle = undefined;

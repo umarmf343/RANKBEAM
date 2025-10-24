@@ -1,9 +1,9 @@
 import { useRankBeamStore } from "@/lib/state";
-import { ArrowUpRight, Filter } from "lucide-react";
+import { AlertTriangle, ArrowUpRight, Filter } from "lucide-react";
 import { useMemo, useState } from "react";
 
 export function KeywordTable() {
-  const { keywordInsights, suggestedKeywords, dataSource, lastUpdated } = useRankBeamStore();
+  const { keywordInsights, suggestedKeywords, dataSource, lastUpdated, error } = useRankBeamStore();
   const [minVolume, setMinVolume] = useState(300);
   const [maxCompetition, setMaxCompetition] = useState(6);
   const [maxTitleDensity, setMaxTitleDensity] = useState(25);
@@ -38,9 +38,9 @@ export function KeywordTable() {
           <div>
             <h2 className="font-display text-3xl font-semibold text-white">Opportunity scorecard</h2>
             <p className="mt-2 max-w-2xl text-sm text-white/70">
-              RankBeam combines deterministic scraping fallbacks with AI-powered clustering to surface keyword themes with
-              immediate monetisation potential. Highlight long-tail phrases with high volume, low title density and strong
-              relevancy to your catalog.
+              RankBeam scrapes live Amazon search results and applies clustering to surface keyword themes with immediate
+              monetisation potential. Highlight long-tail phrases with high volume, low title density and strong relevancy to
+              your catalog.
             </p>
           </div>
           <div className="flex flex-col gap-4">
@@ -104,7 +104,7 @@ export function KeywordTable() {
         </div>
         <div className="mt-4 flex flex-col gap-2 text-xs text-white/50 sm:flex-row sm:items-center sm:justify-between">
           <span>
-            Source: <span className="font-semibold text-white/80">{dataSource === "scraped" ? "Live Amazon scrape" : "RankBeam model fallback"}</span>
+            Source: <span className="font-semibold text-white/80">{dataSource === "scraped" ? "Live Amazon scrape" : "Unavailable"}</span>
           </span>
           {lastUpdated && (
             <span>
@@ -112,8 +112,21 @@ export function KeywordTable() {
             </span>
           )}
         </div>
+        {dataSource === "error" && (
+          <div className="mt-4 flex items-center gap-3 rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+            <AlertTriangle className="h-5 w-5 flex-shrink-0" aria-hidden />
+            <div>
+              <p className="font-semibold">Unable to retrieve live keyword intelligence.</p>
+              <p className="text-rose-100/70">{error ?? "Amazon scraping failed for the current seed keyword. Please try again."}</p>
+            </div>
+          </div>
+        )}
         <div className="mt-8 overflow-hidden rounded-3xl border border-white/10 bg-black/40">
-          {filteredInsights.length > 0 ? (
+          {dataSource === "error" ? (
+            <div className="px-6 py-16 text-center text-sm text-rose-200">
+              We could not load live data from Amazon. Update the seed keyword or try again later.
+            </div>
+          ) : filteredInsights.length > 0 ? (
             <table className="min-w-full text-left text-sm">
               <thead className="bg-white/5 text-xs uppercase tracking-wide text-white/60">
                 <tr>
