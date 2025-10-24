@@ -1,12 +1,15 @@
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
+import path from 'node:path';
 
 const require = createRequire(import.meta.url);
 
-const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const projectRoot = process.cwd();
+let viteBinPath;
 try {
-  require.resolve('vite/package.json', { paths: [projectRoot] });
+  const vitePackageRoot = require.resolve('vite/package.json', { paths: [projectRoot] });
+  const viteDir = path.dirname(vitePackageRoot);
+  viteBinPath = path.join(viteDir, 'bin', 'vite.js');
 } catch (error) {
   console.error(
     'Dependencies are missing. Please run `npm install` in the project root before starting the dev server.'
@@ -17,7 +20,7 @@ try {
   process.exit(1);
 }
 
-const execResult = spawnSync(npmCommand, ['exec', 'vite', ...process.argv.slice(2)], {
+const execResult = spawnSync(process.execPath, [viteBinPath, ...process.argv.slice(2)], {
   cwd: projectRoot,
   stdio: 'inherit'
 });
