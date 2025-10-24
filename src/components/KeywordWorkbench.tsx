@@ -1,19 +1,32 @@
 import { COUNTRIES } from "@/data/countries";
 import { useRankBeamStore } from "@/lib/state";
 import { Search, Sparkles } from "lucide-react";
-import { useEffect, useState } from "react";
-import { useDebounce } from "@/hooks/useDebounce";
+import { useCallback, useEffect, useState, type KeyboardEvent } from "react";
 
 export function KeywordWorkbench() {
-  const { keyword, country, updateKeyword, updateCountry, loading, dataSource, error } = useRankBeamStore();
+  const { keyword, country, updateKeyword, updateCountry, refresh, loading, dataSource, error } = useRankBeamStore();
   const [localKeyword, setLocalKeyword] = useState(keyword);
-  const debounced = useDebounce(localKeyword, 300);
 
-  useEffect(() => {
-    if (debounced !== keyword) {
-      updateKeyword(debounced);
+  const handleSearch = useCallback(() => {
+    const trimmedKeyword = localKeyword.trim();
+
+    if (!trimmedKeyword) {
+      return;
     }
-  }, [debounced, keyword, updateKeyword]);
+
+    updateKeyword(trimmedKeyword);
+    refresh();
+  }, [localKeyword, refresh, updateKeyword]);
+
+  const handleKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLInputElement>) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        handleSearch();
+      }
+    },
+    [handleSearch]
+  );
 
   useEffect(() => {
     setLocalKeyword(keyword);
@@ -42,6 +55,7 @@ export function KeywordWorkbench() {
                   id="rankbeam-seed-keyword"
                   value={localKeyword}
                   onChange={(event) => setLocalKeyword(event.target.value)}
+                  onKeyDown={handleKeyDown}
                   placeholder="e.g. mindfulness journal"
                   className="w-full rounded-full border border-white/10 bg-night/60 px-10 py-3 text-sm text-white placeholder:text-white/40 focus:border-aurora-400 focus:outline-none"
                 />
@@ -63,6 +77,14 @@ export function KeywordWorkbench() {
                   ))}
                 </select>
               </div>
+              <button
+                type="button"
+                onClick={handleSearch}
+                disabled={loading || localKeyword.trim().length === 0}
+                className="rounded-full bg-aurora-500 px-6 py-3 text-sm font-semibold text-night transition hover:bg-aurora-400 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Go
+              </button>
             </div>
             <div className="mt-4 flex items-center gap-2 text-xs text-white/60" aria-live="polite">
               <Sparkles
