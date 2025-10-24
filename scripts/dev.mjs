@@ -10,19 +10,45 @@ const require = createRequire(import.meta.url);
 // from a different directory on Windows).
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(scriptDir, '..');
-let viteBinPath;
-try {
+
+function resolveViteBin() {
   const vitePackageRoot = require.resolve('vite/package.json', { paths: [projectRoot] });
   const viteDir = path.dirname(vitePackageRoot);
-  viteBinPath = path.join(viteDir, 'bin', 'vite.js');
-} catch (error) {
-  console.error(
-    'Dependencies are missing. Please run `npm install` in the project root before starting the dev server.'
-  );
-  if (error instanceof Error) {
-    console.error(error.message);
+  return path.join(viteDir, 'bin', 'vite.js');
+}
+
+function installDependencies() {
+  const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+  const installResult = spawnSync(npmCommand, ['install'], {
+    cwd: projectRoot,
+    stdio: 'inherit'
+  });
+
+  if (installResult.error) {
+    console.error('Failed to run `npm install` automatically.', installResult.error);
+    process.exit(1);
   }
-  process.exit(1);
+
+  if (installResult.status !== 0) {
+    process.exit(installResult.status ?? 1);
+  }
+}
+
+let viteBinPath;
+try {
+  viteBinPath = resolveViteBin();
+} catch (error) {
+  console.warn('Dependencies are missing. Installing them before starting the dev server...');
+  installDependencies();
+  try {
+    viteBinPath = resolveViteBin();
+  } catch (secondError) {
+    console.error('Unable to resolve Vite even after installing dependencies.');
+    if (secondError instanceof Error) {
+      console.error(secondError.message);
+    }
+    process.exit(1);
+  }
 }
 
 const execResult = spawnSync(process.execPath, [viteBinPath, ...process.argv.slice(2)], {
