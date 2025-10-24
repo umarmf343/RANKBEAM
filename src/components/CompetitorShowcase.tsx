@@ -565,9 +565,10 @@ export function CompetitorShowcase() {
                 <button
                   type="button"
                   onClick={handleReverseSearch}
-                  className="rounded-full border border-aurora-400 px-6 py-3 text-sm font-semibold text-aurora-200 transition hover:bg-aurora-500/10"
+                  disabled={reverseInput.trim().length === 0}
+                  className="rounded-full border border-aurora-400 px-6 py-3 text-sm font-semibold text-aurora-200 transition hover:bg-aurora-500/10 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  Scan
+                  Go
                 </button>
               </div>
               {reverseError && <p className="mt-2 text-xs text-rose-300">{reverseError}</p>}
