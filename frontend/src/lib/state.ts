@@ -34,6 +34,7 @@ export type RankBeamState = {
 
 const DEFAULT_KEYWORD = "low content books";
 const DEFAULT_COUNTRY = resolveCountry("US");
+let refreshHandle: ReturnType<typeof setTimeout> | undefined;
 
 export const useRankBeamStore = create<RankBeamState>((set, get) => ({
   keyword: DEFAULT_KEYWORD,
@@ -55,25 +56,34 @@ export const useRankBeamStore = create<RankBeamState>((set, get) => ({
     get().refresh();
   },
   refresh: () => {
-    const { keyword, country } = get();
+    if (refreshHandle) {
+      clearTimeout(refreshHandle);
+    }
+
     set({ loading: true });
 
-    const keywordInsights = generateKeywordInsights(keyword);
-    const categoryTrends = generateCategoryTrends(keyword);
-    const internationalKeywords = generateInternationalKeywords(keyword);
-    const competitors = generateCompetitors(keyword, country.code);
-    const growthSignals = generateGrowthSignals(keyword);
-    const headlineIdeas = generateHeadlineIdeas(keyword);
+    refreshHandle = setTimeout(() => {
+      const { keyword: currentKeyword, country: currentCountry } = get();
 
-    set({
-      keywordInsights,
-      categoryTrends,
-      internationalKeywords,
-      competitors,
-      growthSignals,
-      headlineIdeas,
-      loading: false
-    });
+      const keywordInsights = generateKeywordInsights(currentKeyword);
+      const categoryTrends = generateCategoryTrends(currentKeyword);
+      const internationalKeywords = generateInternationalKeywords(currentKeyword);
+      const competitors = generateCompetitors(currentKeyword, currentCountry.code);
+      const growthSignals = generateGrowthSignals(currentKeyword);
+      const headlineIdeas = generateHeadlineIdeas(currentKeyword);
+
+      set({
+        keywordInsights,
+        categoryTrends,
+        internationalKeywords,
+        competitors,
+        growthSignals,
+        headlineIdeas,
+        loading: false
+      });
+
+      refreshHandle = undefined;
+    }, 200);
   }
 }));
 

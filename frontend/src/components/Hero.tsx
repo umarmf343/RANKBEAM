@@ -14,7 +14,7 @@ export function Hero() {
           backgroundSize: "cover",
           backgroundPosition: "center"
         }}
-        aria-hidden
+        aria-hidden="true"
       />
       <div className="relative mx-auto max-w-6xl px-6 py-24">
         <div className="max-w-3xl space-y-8">

@@ -1,5 +1,4 @@
 import { Sparkles } from "lucide-react";
-import { Fragment } from "react";
 
 const navigation = [
   { name: "Platform", href: "#platform" },
@@ -39,7 +38,6 @@ export function Header() {
             Start Trial
           </a>
         </div>
-        <Fragment />
       </div>
     </header>
   );
