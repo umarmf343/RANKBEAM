@@ -1,5 +1,6 @@
 import { useRankBeamStore } from "@/lib/state";
 import { AlertTriangle, ArrowUpRight, Filter } from "lucide-react";
+import { Link } from "react-router-dom";
 import { useMemo, useState } from "react";
 
 export function KeywordTable() {
@@ -94,12 +95,12 @@ export function KeywordTable() {
                 Prioritise high relevancy matches
               </label>
             </div>
-            <a
-              href="#cta"
+            <Link
+              to="/#cta"
               className="inline-flex items-center gap-2 rounded-full border border-aurora-500/30 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-aurora-200 transition hover:bg-aurora-500/10"
             >
               Export CSV <ArrowUpRight className="h-4 w-4" />
-            </a>
+            </Link>
           </div>
         </div>
         <div className="mt-4 flex flex-col gap-2 text-xs text-white/50 sm:flex-row sm:items-center sm:justify-between">

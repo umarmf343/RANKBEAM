@@ -1,4 +1,5 @@
 import { ArrowRightCircle } from "lucide-react";
+import { Link } from "react-router-dom";
 
 export function CallToAction() {
   return (
@@ -21,9 +22,9 @@ export function CallToAction() {
           >
             Start 7-day trial <ArrowRightCircle className="h-5 w-5" />
           </a>
-          <a href="#platform" className="text-sm font-semibold text-white/70 hover:text-white">
+          <Link to="/platform" className="text-sm font-semibold text-white/70 hover:text-white">
             Download product overview ↗
-          </a>
+          </Link>
         </div>
       </div>
     </section>
