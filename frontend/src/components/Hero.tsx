@@ -1,6 +1,9 @@
+import { useRankBeamStore } from "@/lib/state";
 import { ArrowRight, BarChart3, Globe2 } from "lucide-react";
 
 export function Hero() {
+  const { keyword, country } = useRankBeamStore();
+
   return (
     <section
       id="top"
@@ -56,6 +59,16 @@ export function Hero() {
               </div>
             ))}
           </dl>
+          <div className="grid gap-3 rounded-3xl border border-white/10 bg-black/40 p-4 text-left text-sm text-white/70 sm:grid-cols-2">
+            <div>
+              <p className="text-xs uppercase tracking-wide text-white/50">Active workspace</p>
+              <p className="mt-1 font-semibold text-white">{keyword || "Awaiting seed keyword"}</p>
+            </div>
+            <div>
+              <p className="text-xs uppercase tracking-wide text-white/50">Focus marketplace</p>
+              <p className="mt-1 font-semibold text-white">{country.label}</p>
+            </div>
+          </div>
         </div>
         <div className="mt-16 grid gap-6 sm:grid-cols-3">
           {["AI Keyword Clusters", "Title Density Scoring", "Competitor Swipe Files"].map((feature) => (

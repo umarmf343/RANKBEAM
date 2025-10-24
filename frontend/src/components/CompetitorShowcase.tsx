@@ -1,8 +1,40 @@
 import { useRankBeamStore } from "@/lib/state";
-import { ExternalLink } from "lucide-react";
+import { ExternalLink, LineChart } from "lucide-react";
+import { useMemo } from "react";
 
 export function CompetitorShowcase() {
   const { competitors, country } = useRankBeamStore();
+  const summary = useMemo(() => {
+    if (!competitors.length) {
+      return {
+        averagePrice: 0,
+        averageRating: 0,
+        medianReviews: 0,
+        indieShare: 0
+      };
+    }
+
+    const priceValues = competitors
+      .map((book) => parseFloat(book.price.replace(/[^[0-9.,]/g, "").replace(/,/g, "")))
+      .filter((value) => Number.isFinite(value));
+    const sortedReviews = [...competitors.map((book) => book.reviewCount)].sort((a, b) => a - b);
+    const mid = Math.floor(sortedReviews.length / 2);
+    const medianReviews =
+      sortedReviews.length % 2 === 0
+        ? Math.round((sortedReviews[mid - 1] + sortedReviews[mid]) / 2)
+        : sortedReviews[mid];
+
+    return {
+      averagePrice:
+        priceValues.length > 0
+          ? priceValues.reduce((total, value) => total + value, 0) / priceValues.length
+          : 0,
+      averageRating:
+        competitors.reduce((total, book) => total + book.rating, 0) / Math.max(competitors.length, 1),
+      medianReviews,
+      indieShare: Math.round((competitors.filter((book) => book.isIndie).length / competitors.length) * 100)
+    };
+  }, [competitors]);
 
   return (
     <section id="competitors" className="border-b border-white/5 bg-night">
@@ -18,6 +50,31 @@ export function CompetitorShowcase() {
           <span className="inline-flex items-center gap-2 rounded-full border border-white/10 px-4 py-2 text-xs uppercase tracking-wide text-white/60">
             Marketplace: {country.label}
           </span>
+        </div>
+        <div className="mt-8 grid gap-4 rounded-3xl border border-white/10 bg-black/40 p-6 text-xs text-white/60 sm:grid-cols-2 xl:grid-cols-4">
+          {[{
+            label: "Avg. price",
+            value:
+              summary.averagePrice
+                ? new Intl.NumberFormat("en-US", {
+                    style: "currency",
+                    currency: country.currency || "USD"
+                  }).format(summary.averagePrice)
+                : "--"
+          },
+          { label: "Avg. rating", value: summary.averageRating.toFixed(2) },
+          { label: "Median reviews", value: summary.medianReviews.toLocaleString() },
+          { label: "Indie presence", value: `${summary.indieShare}% of top titles` }].map((stat) => (
+            <div key={stat.label} className="flex items-center justify-between rounded-2xl border border-white/5 bg-white/5 px-4 py-3 text-sm">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-white/50">{stat.label}</p>
+                <p className="mt-1 font-semibold text-white">{stat.value}</p>
+              </div>
+              <span className="flex h-9 w-9 items-center justify-center rounded-full bg-aurora-500/10 text-aurora-200">
+                <LineChart className="h-4 w-4" />
+              </span>
+            </div>
+          ))}
         </div>
         <div className="mt-8 grid gap-6 md:grid-cols-2 xl:grid-cols-4">
           {competitors.map((book) => (
