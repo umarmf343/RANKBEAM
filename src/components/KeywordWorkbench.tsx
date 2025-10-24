@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { useDebounce } from "@/hooks/useDebounce";
 
 export function KeywordWorkbench() {
-  const { keyword, country, updateKeyword, updateCountry, loading } = useRankBeamStore();
+  const { keyword, country, updateKeyword, updateCountry, loading, dataSource, error } = useRankBeamStore();
   const [localKeyword, setLocalKeyword] = useState(keyword);
   const debounced = useDebounce(localKeyword, 300);
 
@@ -65,8 +65,16 @@ export function KeywordWorkbench() {
               </div>
             </div>
             <div className="mt-4 flex items-center gap-2 text-xs text-white/60" aria-live="polite">
-              <Sparkles className={`h-4 w-4 ${loading ? "animate-spin" : "text-aurora-400"}`} />
-              {loading ? "Refreshing keyword intelligence…" : "Insights updated in real-time"}
+              <Sparkles
+                className={`h-4 w-4 ${
+                  loading ? "animate-spin" : dataSource === "error" ? "text-rose-400" : "text-aurora-400"
+                }`}
+              />
+              {loading
+                ? "Refreshing keyword intelligence…"
+                : dataSource === "error"
+                ? error ?? "Unable to load live keyword intelligence"
+                : "Insights updated in real-time"}
             </div>
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
