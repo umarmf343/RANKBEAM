@@ -1,10 +1,15 @@
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
 
-const projectRoot = process.cwd();
+// Resolve the project root relative to this script to avoid issues where
+// process.cwd() is not the repository root (for example when npm is executed
+// from a different directory on Windows).
+const scriptDir = path.dirname(fileURLToPath(import.meta.url));
+const projectRoot = path.resolve(scriptDir, '..');
 let viteBinPath;
 try {
   const vitePackageRoot = require.resolve('vite/package.json', { paths: [projectRoot] });
