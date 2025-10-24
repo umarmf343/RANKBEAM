@@ -1,4 +1,5 @@
 import { ArrowRight, BarChart3, Globe2 } from "lucide-react";
+import { Link } from "react-router-dom";
 
 export function Hero() {
   return (
@@ -30,18 +31,18 @@ export function Hero() {
             and compelling positioning across every storefront.
           </p>
           <div className="flex flex-col gap-4 sm:flex-row">
-            <a
-              href="#keywords"
+            <Link
+              to="/keyword-lab#keywords"
               className="inline-flex items-center justify-center gap-2 rounded-full bg-gradient-to-r from-aurora-400 to-aurora-600 px-6 py-3 font-semibold text-white shadow-glow transition hover:scale-[1.01]"
             >
               Run Keyword Scan <ArrowRight className="h-4 w-4" />
-            </a>
-            <a
-              href="#platform"
+            </Link>
+            <Link
+              to="/platform"
               className="inline-flex items-center justify-center gap-2 rounded-full border border-white/10 px-6 py-3 font-semibold text-white/80 transition hover:text-white"
             >
               Explore capabilities
-            </a>
+            </Link>
           </div>
           <dl className="grid grid-cols-2 gap-6 pt-8 sm:grid-cols-4">
             {[

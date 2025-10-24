@@ -1,29 +1,48 @@
-import { CallToAction } from "@/components/CallToAction";
-import { CompetitorShowcase } from "@/components/CompetitorShowcase";
-import { ExpansionPanel } from "@/components/ExpansionPanel";
 import { Footer } from "@/components/Footer";
 import { Header } from "@/components/Header";
-import { Hero } from "@/components/Hero";
-import { InsightSummary } from "@/components/InsightSummary";
-import { KeywordTable } from "@/components/KeywordTable";
-import { ListingBlueprint } from "@/components/ListingBlueprint";
-import { KeywordWorkbench } from "@/components/KeywordWorkbench";
-import { SignalsPanel } from "@/components/SignalsPanel";
+import { CompetitorsPage } from "@/pages/CompetitorsPage";
+import { ExpansionPage } from "@/pages/ExpansionPage";
+import { HomePage } from "@/pages/HomePage";
+import { KeywordLabPage } from "@/pages/KeywordLabPage";
+import { PlatformPage } from "@/pages/PlatformPage";
+import { Route, Routes, useLocation } from "react-router-dom";
+import { useEffect } from "react";
+
+function ScrollManager() {
+  const location = useLocation();
+  const { pathname, hash } = location;
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: "auto" });
+  }, [pathname]);
+
+  useEffect(() => {
+    if (!hash) return;
+
+    const id = hash.replace("#", "");
+    const element = document.getElementById(id);
+    if (element) {
+      element.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, [hash, pathname]);
+
+  return null;
+}
 
 function App() {
   return (
     <div className="flex min-h-screen flex-col bg-night text-white">
       <Header />
       <main className="flex-1">
-        <Hero />
-        <KeywordWorkbench />
-        <InsightSummary />
-        <KeywordTable />
-        <SignalsPanel />
-        <CompetitorShowcase />
-        <ListingBlueprint />
-        <ExpansionPanel />
-        <CallToAction />
+        <ScrollManager />
+        <Routes>
+          <Route path="/" element={<HomePage />} />
+          <Route path="/platform" element={<PlatformPage />} />
+          <Route path="/keyword-lab" element={<KeywordLabPage />} />
+          <Route path="/competitors" element={<CompetitorsPage />} />
+          <Route path="/expansion" element={<ExpansionPage />} />
+          <Route path="*" element={<HomePage />} />
+        </Routes>
       </main>
       <Footer />
     </div>
