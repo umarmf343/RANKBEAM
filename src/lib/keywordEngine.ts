@@ -1,4 +1,4 @@
-import { COUNTRIES, resolveCountry } from "@/data/countries";
+import { COUNTRIES, resolveCountry } from "../data/countries";
 
 export type KeywordInsight = {
   keyword: string;
@@ -6,6 +6,12 @@ export type KeywordInsight = {
   competitionScore: number;
   relevancyScore: number;
   titleDensity: number;
+  competitors: number;
+  avgReviews: number;
+  avgPrice: number;
+  avgAge: number;
+  opportunityScore: number;
+  demandScore: number;
 };
 
 export type CategoryTrend = {
@@ -103,7 +109,7 @@ const headlineNouns = [
   "Bootcamp"
 ];
 
-function stableHash(input: string): number {
+export function stableHash(input: string): number {
   let hash = 2166136261;
   for (let i = 0; i < input.length; i += 1) {
     hash ^= input.charCodeAt(i);
@@ -112,7 +118,7 @@ function stableHash(input: string): number {
   return hash >>> 0;
 }
 
-function stableFloat(key: string): number {
+export function stableFloat(key: string): number {
   return (stableHash(key) % 10000) / 10000;
 }
 
@@ -157,13 +163,26 @@ export function generateKeywordInsights(seed: string, limit = 25): KeywordInsigh
     const searchVolume = Math.max(120 + index * 5, baseSearch);
     const { contain, exact } = estimateTitleMatches(phrase);
     const relevancy = Math.round(Math.max(0.5, 0.92 - index * 0.035 + (1 - weight) * 0.18) * 100) / 100;
+    const competitors = Math.max(15, Math.round(32 + contain * 2 + weight * 60 - index * 2));
+    const avgReviews = Math.round(40 + weight * 380 + contain * 5 - index * 6);
+    const avgPrice = Number.parseFloat((11 + weight * 16 + index * 0.35).toFixed(2));
+    const avgAge = Math.round(8 + weight * 30 + index * 0.8);
+    const competitionScore = Number.parseFloat(Math.max(1.1, contain / 9 + weight * 2.1).toFixed(2));
+    const demandScore = Math.min(100, Math.round(searchVolume / 35 + weight * 12));
+    const opportunityScore = Math.round(Math.min(100, demandScore * ((11 - competitionScore) / 10)));
 
     return {
       keyword: phrase,
       searchVolume,
-      competitionScore: parseFloat((contain / 10).toFixed(2)),
+      competitionScore,
       relevancyScore: relevancy,
-      titleDensity: parseFloat(exact.toFixed(2))
+      titleDensity: Number.parseFloat(exact.toFixed(2)),
+      competitors,
+      avgReviews: Math.max(18, avgReviews),
+      avgPrice,
+      avgAge,
+      opportunityScore,
+      demandScore
     };
   });
 }

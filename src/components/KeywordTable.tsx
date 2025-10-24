@@ -2,25 +2,8 @@ import { useRankBeamStore } from "@/lib/state";
 import { ArrowUpRight, Filter } from "lucide-react";
 import { useMemo, useState } from "react";
 
-function opportunityScore({
-  searchVolume,
-  competitionScore,
-  relevancyScore,
-  titleDensity
-}: {
-  searchVolume: number;
-  competitionScore: number;
-  relevancyScore: number;
-  titleDensity: number;
-}): number {
-  const normalizedCompetition = Math.max(1, competitionScore);
-  const densityPenalty = 1 + titleDensity * 0.05;
-  const relevancyBoost = 0.5 + relevancyScore / 2;
-  return Math.round((searchVolume * relevancyBoost) / (normalizedCompetition * densityPenalty));
-}
-
 export function KeywordTable() {
-  const { keywordInsights } = useRankBeamStore();
+  const { keywordInsights, suggestedKeywords, dataSource, lastUpdated } = useRankBeamStore();
   const [minVolume, setMinVolume] = useState(300);
   const [maxCompetition, setMaxCompetition] = useState(6);
   const [maxTitleDensity, setMaxTitleDensity] = useState(25);
@@ -119,6 +102,16 @@ export function KeywordTable() {
             </a>
           </div>
         </div>
+        <div className="mt-4 flex flex-col gap-2 text-xs text-white/50 sm:flex-row sm:items-center sm:justify-between">
+          <span>
+            Source: <span className="font-semibold text-white/80">{dataSource === "scraped" ? "Live Amazon scrape" : "RankBeam model fallback"}</span>
+          </span>
+          {lastUpdated && (
+            <span>
+              Last updated <time dateTime={lastUpdated}>{new Date(lastUpdated).toLocaleString()}</time>
+            </span>
+          )}
+        </div>
         <div className="mt-8 overflow-hidden rounded-3xl border border-white/10 bg-black/40">
           {filteredInsights.length > 0 ? (
             <table className="min-w-full text-left text-sm">
@@ -126,15 +119,18 @@ export function KeywordTable() {
                 <tr>
                   <th className="px-6 py-4">Keyword</th>
                   <th className="px-6 py-4">Search volume</th>
-                  <th className="px-6 py-4">Competition</th>
-                  <th className="px-6 py-4">Relevancy</th>
+                  <th className="px-6 py-4">Competitors</th>
+                  <th className="px-6 py-4">Avg reviews</th>
+                  <th className="px-6 py-4">Avg price</th>
                   <th className="px-6 py-4">Title density</th>
+                  <th className="px-6 py-4">Avg age</th>
                   <th className="px-6 py-4">Opportunity score</th>
+                  <th className="px-6 py-4">Demand score</th>
+                  <th className="px-6 py-4">Competition score</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredInsights.map((row, index) => {
-                  const score = opportunityScore(row);
                   const isLeader = topOpportunity?.keyword === row.keyword;
                   return (
                     <tr
@@ -149,27 +145,22 @@ export function KeywordTable() {
                         {isLeader && <span className="ml-2 rounded-full bg-aurora-500/20 px-2 py-0.5 text-xs text-aurora-100">Top pick</span>}
                       </td>
                       <td className="px-6 py-4">{row.searchVolume.toLocaleString()}</td>
-                      <td className="px-6 py-4">
-                        <span className="inline-flex rounded-full bg-aurora-500/10 px-3 py-1 text-xs font-semibold text-aurora-200">
-                          {row.competitionScore.toFixed(2)}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4">
-                        <span className="inline-flex items-center gap-2">
-                          <span className="h-2.5 w-2.5 rounded-full bg-aurora-400" />
-                          {(row.relevancyScore * 100).toFixed(0)}%
-                        </span>
-                      </td>
+                      <td className="px-6 py-4">{row.competitors.toLocaleString()}</td>
+                      <td className="px-6 py-4">{row.avgReviews.toLocaleString()}</td>
+                      <td className="px-6 py-4">${row.avgPrice.toFixed(2)}</td>
                       <td className="px-6 py-4">
                         {row.titleDensity.toFixed(0)}
                         <span className="ml-2 text-xs text-white/50">titles</span>
                       </td>
+                      <td className="px-6 py-4">{row.avgAge} months</td>
                       <td className="px-6 py-4">
                         <span className="inline-flex items-center gap-2 rounded-full bg-white/5 px-3 py-1 text-xs font-semibold text-white">
-                          {score}
+                          {row.opportunityScore}
                           {isLeader && <span className="text-aurora-300">▲</span>}
                         </span>
                       </td>
+                      <td className="px-6 py-4">{row.demandScore}</td>
+                      <td className="px-6 py-4">{Math.round(row.competitionScore * 10)}</td>
                     </tr>
                   );
                 })}
@@ -181,6 +172,18 @@ export function KeywordTable() {
             </div>
           )}
         </div>
+        {suggestedKeywords.length > 0 && (
+          <div className="mt-8 rounded-3xl border border-white/10 bg-black/40 p-6">
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-white/70">Suggested keywords</h3>
+            <div className="mt-4 flex flex-wrap gap-2 text-xs">
+              {suggestedKeywords.map((keyword) => (
+                <span key={keyword} className="rounded-full bg-white/10 px-3 py-1 text-white/70">
+                  {keyword}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </section>
   );
