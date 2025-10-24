@@ -17,11 +17,29 @@ function resolveViteBin() {
   return path.join(viteDir, 'bin', 'vite.js');
 }
 
-function installDependencies() {
+function getNpmCommand() {
+  const npmExecPath = process.env.npm_execpath;
+
+  if (npmExecPath) {
+    return {
+      command: process.execPath,
+      args: [npmExecPath, 'install']
+    };
+  }
+
   const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-  const installResult = spawnSync(npmCommand, ['install'], {
+  return {
+    command: npmCommand,
+    args: ['install']
+  };
+}
+
+function installDependencies() {
+  const { command, args } = getNpmCommand();
+  const installResult = spawnSync(command, args, {
     cwd: projectRoot,
-    stdio: 'inherit'
+    stdio: 'inherit',
+    shell: command === 'npm.cmd'
   });
 
   if (installResult.error) {
