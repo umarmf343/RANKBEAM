@@ -23,7 +23,11 @@ export function CompetitorShowcase() {
           {competitors.map((book) => (
             <article key={book.asin} className="flex flex-col overflow-hidden rounded-3xl border border-white/10 bg-black/40">
               <div className="relative h-48 w-full overflow-hidden">
-                <img src={book.cover} alt="" className="h-full w-full object-cover transition duration-500 hover:scale-105" />
+                <img
+                  src={book.cover}
+                  alt={`${book.title} cover art`}
+                  className="h-full w-full object-cover transition duration-500 hover:scale-105"
+                />
                 {book.isIndie && (
                   <span className="absolute left-3 top-3 rounded-full bg-emerald-500/80 px-3 py-1 text-xs font-semibold text-emerald-50">
                     Indie spotlight

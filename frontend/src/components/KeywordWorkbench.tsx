@@ -1,7 +1,7 @@
 import { COUNTRIES } from "@/data/countries";
 import { useRankBeamStore } from "@/lib/state";
 import { Search, Sparkles } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useDebounce } from "@/hooks/useDebounce";
 
 export function KeywordWorkbench() {
@@ -9,11 +9,15 @@ export function KeywordWorkbench() {
   const [localKeyword, setLocalKeyword] = useState(keyword);
   const debounced = useDebounce(localKeyword, 300);
 
-  useMemo(() => {
+  useEffect(() => {
     if (debounced !== keyword) {
       updateKeyword(debounced);
     }
   }, [debounced, keyword, updateKeyword]);
+
+  useEffect(() => {
+    setLocalKeyword(keyword);
+  }, [keyword]);
 
   return (
     <section id="keywords" className="border-b border-white/5 bg-night">
@@ -25,30 +29,42 @@ export function KeywordWorkbench() {
             storefront and instantly uncover suggested phrases, search volume, competition and listing density metrics.
           </p>
           <div className="rounded-3xl border border-white/10 bg-black/40 p-6 shadow-[0_40px_120px_-60px_rgba(76,102,241,0.4)]">
-            <label className="block text-xs font-semibold uppercase tracking-wide text-white/60">Seed keyword</label>
+            <label
+              className="block text-xs font-semibold uppercase tracking-wide text-white/60"
+              htmlFor="rankbeam-seed-keyword"
+            >
+              Seed keyword
+            </label>
             <div className="mt-3 flex flex-col gap-3 sm:flex-row">
               <div className="relative flex-1">
                 <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-white/40" />
                 <input
+                  id="rankbeam-seed-keyword"
                   value={localKeyword}
                   onChange={(event) => setLocalKeyword(event.target.value)}
                   placeholder="e.g. mindfulness journal"
                   className="w-full rounded-full border border-white/10 bg-night/60 px-10 py-3 text-sm text-white placeholder:text-white/40 focus:border-aurora-400 focus:outline-none"
                 />
               </div>
-              <select
-                value={country.code}
-                onChange={(event) => updateCountry(event.target.value)}
-                className="rounded-full border border-white/10 bg-night/80 px-4 py-3 text-sm text-white focus:border-aurora-400 focus:outline-none"
-              >
-                {COUNTRIES.map((item) => (
-                  <option key={item.code} value={item.code}>
-                    {item.label}
-                  </option>
-                ))}
-              </select>
+              <div className="flex flex-col gap-1">
+                <label className="sr-only" htmlFor="rankbeam-marketplace">
+                  Marketplace
+                </label>
+                <select
+                  id="rankbeam-marketplace"
+                  value={country.code}
+                  onChange={(event) => updateCountry(event.target.value)}
+                  className="rounded-full border border-white/10 bg-night/80 px-4 py-3 text-sm text-white focus:border-aurora-400 focus:outline-none"
+                >
+                  {COUNTRIES.map((item) => (
+                    <option key={item.code} value={item.code}>
+                      {item.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
-            <div className="mt-4 flex items-center gap-2 text-xs text-white/60">
+            <div className="mt-4 flex items-center gap-2 text-xs text-white/60" aria-live="polite">
               <Sparkles className={`h-4 w-4 ${loading ? "animate-spin" : "text-aurora-400"}`} />
               {loading ? "Refreshing keyword intelligence…" : "Insights updated in real-time"}
             </div>
