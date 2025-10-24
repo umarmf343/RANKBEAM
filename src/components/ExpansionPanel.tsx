@@ -19,20 +19,26 @@ export function ExpansionPanel() {
             <Globe className="h-4 w-4" /> Multilingual ready
           </span>
         </div>
-        <div className="mt-8 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          {internationalKeywords.map((entry) => (
-            <div key={entry.countryCode} className="rounded-2xl border border-white/10 bg-black/40 p-5">
-              <div className="flex items-center justify-between">
-                <p className="text-sm font-semibold text-white">{entry.countryName}</p>
-                <span className="text-xs text-white/40">{entry.countryCode}</span>
+        {internationalKeywords.length > 0 ? (
+          <div className="mt-8 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            {internationalKeywords.map((entry) => (
+              <div key={entry.countryCode} className="rounded-2xl border border-white/10 bg-black/40 p-5">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-semibold text-white">{entry.countryName}</p>
+                  <span className="text-xs text-white/40">{entry.countryCode}</span>
+                </div>
+                <p className="mt-3 text-sm text-white/70">Suggested keyword</p>
+                <p className="mt-1 text-base font-medium text-aurora-200">{entry.keyword}</p>
+                <p className="mt-4 text-xs uppercase tracking-wide text-white/50">Search Volume</p>
+                <p className="text-xl font-semibold text-white">{entry.searchVolume.toLocaleString()}</p>
               </div>
-              <p className="mt-3 text-sm text-white/70">Suggested keyword</p>
-              <p className="mt-1 text-base font-medium text-aurora-200">{entry.keyword}</p>
-              <p className="mt-4 text-xs uppercase tracking-wide text-white/50">Search Volume</p>
-              <p className="text-xl font-semibold text-white">{entry.searchVolume.toLocaleString()}</p>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        ) : (
+          <div className="mt-10 rounded-3xl border border-white/10 bg-black/40 p-8 text-sm text-white/60">
+            Live international insights will appear once RankBeam completes multi-market scraping for your seed keyword.
+          </div>
+        )}
       </div>
     </section>
   );

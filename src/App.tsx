@@ -1,12 +1,13 @@
 import { Footer } from "@/components/Footer";
 import { Header } from "@/components/Header";
+import { useRankBeamStore } from "@/lib/state";
 import { CompetitorsPage } from "@/pages/CompetitorsPage";
 import { ExpansionPage } from "@/pages/ExpansionPage";
 import { HomePage } from "@/pages/HomePage";
 import { KeywordLabPage } from "@/pages/KeywordLabPage";
 import { PlatformPage } from "@/pages/PlatformPage";
 import { Route, Routes, useLocation } from "react-router-dom";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
 function ScrollManager() {
   const location = useLocation();
@@ -30,6 +31,15 @@ function ScrollManager() {
 }
 
 function App() {
+  const refresh = useRankBeamStore((state) => state.refresh);
+  const hasBootstrapped = useRef(false);
+
+  useEffect(() => {
+    if (hasBootstrapped.current) return;
+    hasBootstrapped.current = true;
+    refresh();
+  }, [refresh]);
+
   return (
     <div className="flex min-h-screen flex-col bg-night text-white">
       <Header />
