@@ -245,14 +245,14 @@ function generateReverseResults(asin: string, insights: KeywordInsight[], seed: 
         relevancyScore: 0.6 + stableFloat(`${asin}-rv-rel-${index}`) * 0.35
       }));
 
-  return base.slice(0, 30).map((row, index) => ({
+  return base.slice(0, 30).map<ReverseKeyword>((row, index) => ({
     keyword: row.keyword,
     searchVolume: row.searchVolume,
     opportunityScore: row.opportunityScore,
     competitionLevel: row.competitionScore,
     avgReviews: row.avgReviews,
     relevance: Number.parseFloat(((row.relevancyScore ?? 0.7) * 100).toFixed(1)) + index % 2
-  } satisfies ReverseKeyword);
+  }));
 }
 
 function buildCompetitorProfile(
