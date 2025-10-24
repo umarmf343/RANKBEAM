@@ -4,7 +4,9 @@ import { ExpansionPanel } from "@/components/ExpansionPanel";
 import { Footer } from "@/components/Footer";
 import { Header } from "@/components/Header";
 import { Hero } from "@/components/Hero";
+import { InsightSummary } from "@/components/InsightSummary";
 import { KeywordTable } from "@/components/KeywordTable";
+import { ListingBlueprint } from "@/components/ListingBlueprint";
 import { KeywordWorkbench } from "@/components/KeywordWorkbench";
 import { SignalsPanel } from "@/components/SignalsPanel";
 
@@ -15,9 +17,11 @@ function App() {
       <main className="flex-1">
         <Hero />
         <KeywordWorkbench />
+        <InsightSummary />
         <KeywordTable />
         <SignalsPanel />
         <CompetitorShowcase />
+        <ListingBlueprint />
         <ExpansionPanel />
         <CallToAction />
       </main>
