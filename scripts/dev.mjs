@@ -39,7 +39,14 @@ function installDependencies() {
   const installResult = spawnSync(command, args, {
     cwd: projectRoot,
     stdio: 'inherit',
-    shell: command === 'npm.cmd'
+    shell: command === 'npm.cmd',
+    env: {
+      ...process.env,
+      // Ensure devDependencies are installed even when a user has configured
+      // npm to omit them (e.g. via `npm config set production true`).
+      npm_config_production: 'false',
+      npm_config_omit: ''
+    }
   });
 
   if (installResult.error) {
@@ -62,6 +69,7 @@ try {
     viteBinPath = resolveViteBin();
   } catch (secondError) {
     console.error('Unable to resolve Vite even after installing dependencies.');
+    console.error('Make sure dev dependencies are installed (try `npm install --include=dev`).');
     if (secondError instanceof Error) {
       console.error(secondError.message);
     }
