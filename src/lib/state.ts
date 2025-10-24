@@ -116,4 +116,5 @@ export const useRankBeamStore = create<RankBeamState>((set, get) => ({
   }
 }));
 
-useRankBeamStore.getState().refresh();
+// Refresh is intentionally triggered by user interactions (e.g. clicking "Go") so that
+// scraping does not begin until the user explicitly requests it.
