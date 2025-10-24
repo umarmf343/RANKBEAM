@@ -357,6 +357,7 @@ export function CompetitorShowcase() {
   const [keywordSearch, setKeywordSearch] = useState("");
   const [keywordSort, setKeywordSort] = useState<KeywordSort>("volume");
   const [reverseError, setReverseError] = useState<string | undefined>();
+  const [hasTriggeredSearch, setHasTriggeredSearch] = useState(false);
 
   useEffect(() => {
     setLocalKeyword(keyword);
@@ -366,10 +367,11 @@ export function CompetitorShowcase() {
   const handleSearch = useCallback(() => {
     const trimmedKeyword = localKeyword.trim();
     if (!trimmedKeyword) return;
+    setHasTriggeredSearch(true);
     setActiveKeyword(trimmedKeyword);
     updateKeyword(trimmedKeyword);
     refresh();
-  }, [localKeyword, refresh, updateKeyword]);
+  }, [localKeyword, refresh, updateKeyword, setHasTriggeredSearch]);
 
   const handleKeyDown = useCallback(
     (event: KeyboardEvent<HTMLInputElement>) => {
@@ -506,6 +508,13 @@ export function CompetitorShowcase() {
   }, [reverseInput, keywordInsights, activeKeyword]);
 
   const reviewWindowLabel = reviewWindow.label.toLowerCase();
+  const showLoading = hasTriggeredSearch && loading;
+  const statusIconClass = showLoading ? "animate-spin" : "text-aurora-400";
+  const statusText = showLoading
+    ? "Scanning competitor landscape…"
+    : hasTriggeredSearch
+      ? "Updated competitor intelligence"
+      : "Ready to scan competitor landscape";
 
   return (
     <section id="competitors" className="border-b border-white/5 bg-night">
@@ -574,8 +583,8 @@ export function CompetitorShowcase() {
               {reverseError && <p className="mt-2 text-xs text-rose-300">{reverseError}</p>}
             </div>
             <div className="flex items-center gap-2 text-xs text-white/60" aria-live="polite">
-              <Sparkles className={`h-4 w-4 ${loading ? "animate-spin" : "text-aurora-400"}`} />
-              {loading ? "Scanning competitor landscape…" : "Updated competitor intelligence"}
+              <Sparkles className={`h-4 w-4 ${statusIconClass}`} />
+              {statusText}
             </div>
           </div>
         </div>
