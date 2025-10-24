@@ -55,12 +55,10 @@ export const useRankBeamStore = create<RankBeamState>((set, get) => ({
   error: undefined,
   updateKeyword: (keyword) => {
     set({ keyword });
-    get().refresh();
   },
   updateCountry: (countryCode) => {
     const country = resolveCountry(countryCode);
     set({ country });
-    get().refresh();
   },
   refresh: () => {
     if (refreshHandle) {
