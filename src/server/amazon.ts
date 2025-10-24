@@ -16,14 +16,16 @@ type ParsedProduct = {
   price?: number;
   rating?: number;
   reviews?: number;
+  image?: string;
 };
 
 const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
 
-const COVER_POOL = [
-  "https://images.unsplash.com/photo-1498050108023-c5249f4df085?auto=format&fit=crop&w=360&q=80"
-];
+function buildFallbackCover(title: string): string {
+  const label = encodeURIComponent(title.slice(0, 32) || "RankBeam");
+  return `https://placehold.co/360x540/111827/FFFFFF?text=${label}`;
+}
 
 function normaliseNumber(input: string | undefined): number | undefined {
   if (!input) return undefined;
@@ -78,12 +80,16 @@ function collectProducts(html: string, origin: string): ParsedProduct[] {
       $(element).find("span.a-size-base.s-underline-text").first().text();
     const reviews = reviewsLabel ? normaliseNumber(reviewsLabel) : undefined;
 
+    const imageNode = $(element).find("img.s-image").first();
+    const image = imageNode.attr("src") || imageNode.attr("data-src") || imageNode.attr("data-image-src");
+
     products.push({
       title,
       url,
       price,
       rating,
-      reviews
+      reviews,
+      image
     });
   });
 
@@ -158,7 +164,7 @@ function buildCompetitors(products: ParsedProduct[], countryCode: string): Compe
     const price = formatPrice(product.price, country.currency);
     const rating = product.rating && Number.isFinite(product.rating) ? Math.min(5, product.rating) : 0;
     const reviewCount = Math.round(product.reviews ?? 0);
-    const cover = COVER_POOL[index % COVER_POOL.length];
+    const cover = product.image ?? buildFallbackCover(product.title);
     return {
       rank: index + 1,
       title: product.title,
