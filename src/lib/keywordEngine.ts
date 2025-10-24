@@ -215,9 +215,10 @@ export function generateHeadlineIdeas(seed: string): string[] {
   return Array.from(ideas).slice(0, 8);
 }
 
-const sampleCovers = [
-  "https://images.unsplash.com/photo-1498050108023-c5249f4df085?auto=format&fit=crop&w=360&q=80"
-];
+function buildFallbackCover(title: string): string {
+  const label = encodeURIComponent(title.slice(0, 32) || "RankBeam");
+  return `https://placehold.co/360x540/111827/FFFFFF?text=${label}`;
+}
 
 export function generateCompetitors(seed: string, country: string): CompetitorResult[] {
   const normalized = seed.trim() || "Amazon Publishing";
@@ -242,7 +243,7 @@ export function generateCompetitors(seed: string, country: string): CompetitorRe
       reviewCount,
       bestSellerRank: `#${Math.round(5 + hash * 40)} in ${category}`,
       url: `https://${cfg.host}/dp/${asin}`,
-      cover: sampleCovers[index % sampleCovers.length],
+      cover: buildFallbackCover(`${titleize(normalized)} ${category}`),
       isIndie: indie
     };
   });
