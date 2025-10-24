@@ -16,6 +16,7 @@ import {
 } from "@/lib/keywordEngine";
 import type { CountryConfig } from "@/data/countries";
 import { resolveCountry } from "@/data/countries";
+import { fetchKeywordIntelligence } from "@/lib/api";
 
 export type RankBeamState = {
   keyword: string;
@@ -27,6 +28,9 @@ export type RankBeamState = {
   growthSignals: GrowthSignal[];
   headlineIdeas: string[];
   loading: boolean;
+  suggestedKeywords: string[];
+  dataSource: "scraped" | "fallback";
+  lastUpdated?: string;
   updateKeyword: (keyword: string) => void;
   updateCountry: (countryCode: string) => void;
   refresh: () => void;
@@ -45,7 +49,9 @@ export const useRankBeamStore = create<RankBeamState>((set, get) => ({
   competitors: [],
   growthSignals: [],
   headlineIdeas: [],
+  suggestedKeywords: [],
   loading: false,
+  dataSource: "fallback",
   updateKeyword: (keyword) => {
     set({ keyword });
     get().refresh();
@@ -64,25 +70,53 @@ export const useRankBeamStore = create<RankBeamState>((set, get) => ({
 
     refreshHandle = setTimeout(() => {
       const { keyword: currentKeyword, country: currentCountry } = get();
+      void (async () => {
+        try {
+          const payload = await fetchKeywordIntelligence(currentKeyword, currentCountry.code);
+          const categoryTrends = generateCategoryTrends(currentKeyword);
+          const internationalKeywords = generateInternationalKeywords(currentKeyword);
+          const growthSignals = generateGrowthSignals(currentKeyword);
+          const headlineIdeas = generateHeadlineIdeas(currentKeyword);
+          const competitors =
+            payload.competitors && payload.competitors.length > 0
+              ? payload.competitors
+              : generateCompetitors(currentKeyword, currentCountry.code);
 
-      const keywordInsights = generateKeywordInsights(currentKeyword);
-      const categoryTrends = generateCategoryTrends(currentKeyword);
-      const internationalKeywords = generateInternationalKeywords(currentKeyword);
-      const competitors = generateCompetitors(currentKeyword, currentCountry.code);
-      const growthSignals = generateGrowthSignals(currentKeyword);
-      const headlineIdeas = generateHeadlineIdeas(currentKeyword);
-
-      set({
-        keywordInsights,
-        categoryTrends,
-        internationalKeywords,
-        competitors,
-        growthSignals,
-        headlineIdeas,
-        loading: false
-      });
-
-      refreshHandle = undefined;
+          set({
+            keywordInsights: payload.keywords,
+            categoryTrends,
+            internationalKeywords,
+            competitors,
+            growthSignals,
+            headlineIdeas,
+            suggestedKeywords: payload.suggestedKeywords,
+            dataSource: payload.source,
+            lastUpdated: payload.scrapedAt,
+            loading: false
+          });
+        } catch (error) {
+          const keywordInsights = generateKeywordInsights(currentKeyword);
+          const categoryTrends = generateCategoryTrends(currentKeyword);
+          const internationalKeywords = generateInternationalKeywords(currentKeyword);
+          const competitors = generateCompetitors(currentKeyword, currentCountry.code);
+          const growthSignals = generateGrowthSignals(currentKeyword);
+          const headlineIdeas = generateHeadlineIdeas(currentKeyword);
+          set({
+            keywordInsights,
+            categoryTrends,
+            internationalKeywords,
+            competitors,
+            growthSignals,
+            headlineIdeas,
+            suggestedKeywords: keywordInsights.slice(1, 12).map((row) => row.keyword),
+            dataSource: "fallback",
+            lastUpdated: new Date().toISOString(),
+            loading: false
+          });
+        } finally {
+          refreshHandle = undefined;
+        }
+      })();
     }, 200);
   }
 }));

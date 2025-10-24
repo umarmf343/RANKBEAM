@@ -2,16 +2,6 @@ import { useRankBeamStore } from "@/lib/state";
 import { Activity, Compass, Globe2, Target } from "lucide-react";
 import { useMemo } from "react";
 
-function formatNumber(value: number): string {
-  if (value >= 1_000_000) {
-    return `${(value / 1_000_000).toFixed(1)}M`;
-  }
-  if (value >= 1_000) {
-    return `${(value / 1_000).toFixed(1)}k`;
-  }
-  return value.toString();
-}
-
 export function InsightSummary() {
   const { keywordInsights, competitors, internationalKeywords } = useRankBeamStore();
 
@@ -25,13 +15,13 @@ export function InsightSummary() {
 
     const lowCompetition = keywordInsights
       .filter((item) => item.competitionScore <= 4 && item.titleDensity <= 15 && item.relevancyScore >= 0.6)
-      .sort((a, b) => b.searchVolume - a.searchVolume);
+      .sort((a, b) => b.opportunityScore - a.opportunityScore);
 
-    const averageSearchVolume = Math.round(
-      keywordInsights.reduce((total, item) => total + item.searchVolume, 0) / keywordInsights.length
+    const averageCompetition =
+      keywordInsights.reduce((total, item) => total + item.competitionScore, 0) / keywordInsights.length;
+    const averageDemand = Math.round(
+      keywordInsights.reduce((total, item) => total + item.demandScore, 0) / keywordInsights.length
     );
-
-    const averageCompetition = keywordInsights.reduce((total, item) => total + item.competitionScore, 0) / keywordInsights.length;
 
     const topInternational =
       internationalKeywords.length > 0
@@ -67,16 +57,16 @@ export function InsightSummary() {
         title: "Highest demand keyword",
         primary: highestDemand.keyword,
         stat: `${highestDemand.searchVolume.toLocaleString()} searches`,
-        context: `Relevancy ${(highestDemand.relevancyScore * 100).toFixed(0)}% • Competition ${highestDemand.competitionScore.toFixed(1)}`,
+        context: `Demand score ${highestDemand.demandScore} • Competition ${Math.round(highestDemand.competitionScore * 10)}`,
         icon: Target
       },
       {
         title: "Opportunity rich phrases",
         primary: `${lowCompetition.length} ready to launch`,
         stat: lowCompetition[0]
-          ? `${lowCompetition[0].keyword} (${lowCompetition[0].searchVolume.toLocaleString()} searches)`
+          ? `${lowCompetition[0].keyword} (Opportunity ${lowCompetition[0].opportunityScore})`
           : "Review filter criteria",
-        context: `Avg competition ${averageCompetition.toFixed(1)} • Avg volume ${formatNumber(averageSearchVolume)}`,
+        context: `Avg competition ${Math.round(averageCompetition * 10)} • Avg demand ${averageDemand}`,
         icon: Compass
       },
       {
