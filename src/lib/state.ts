@@ -29,7 +29,7 @@ export type RankBeamState = {
   refresh: () => void;
 };
 
-const DEFAULT_KEYWORD = "low content books";
+const DEFAULT_KEYWORD = "";
 const DEFAULT_COUNTRY = resolveCountry("US");
 let refreshHandle: ReturnType<typeof setTimeout> | undefined;
 
@@ -157,18 +157,35 @@ export const useRankBeamStore = create<RankBeamState>((set, get) => ({
   refresh: () => {
     if (refreshHandle) {
       clearTimeout(refreshHandle);
+      refreshHandle = undefined;
+    }
+
+    const { keyword: scheduledKeyword } = get();
+    const trimmedKeyword = scheduledKeyword.trim();
+
+    if (!trimmedKeyword) {
+      set({ loading: false });
+      return;
     }
 
     set({ loading: true });
 
     refreshHandle = setTimeout(() => {
       const { keyword: currentKeyword, country: currentCountry } = get();
+      const activeKeyword = currentKeyword.trim();
+
+      if (!activeKeyword) {
+        set({ loading: false });
+        refreshHandle = undefined;
+        return;
+      }
+
       void (async () => {
         try {
-          const payload = await fetchKeywordIntelligence(currentKeyword, currentCountry.code);
-          const categoryTrends = deriveCategoryTrends(currentKeyword, payload.keywords);
+          const payload = await fetchKeywordIntelligence(activeKeyword, currentCountry.code);
+          const categoryTrends = deriveCategoryTrends(activeKeyword, payload.keywords);
           const growthSignals = deriveGrowthSignals(payload.keywords);
-          const headlineIdeas = deriveHeadlineIdeas(currentKeyword, payload.keywords);
+          const headlineIdeas = deriveHeadlineIdeas(activeKeyword, payload.keywords);
           const competitors = payload.competitors ?? [];
 
           set({
