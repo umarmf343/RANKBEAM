@@ -21,6 +21,12 @@ type ParsedProduct = {
 const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
 
+type SuggestionResponse = {
+  suggestions?: Array<{
+    value?: string;
+  }>;
+};
+
 function buildFallbackCover(title: string): string {
   const label = encodeURIComponent(title.slice(0, 32) || "RankBeam");
   return `https://placehold.co/360x540/111827/FFFFFF?text=${label}`;
@@ -209,27 +215,68 @@ async function scrapeSingleKeyword(
   return { row: summariseProducts(seed, products), products };
 }
 
-function generateVariants(seed: string): string[] {
+function deriveCompletionHost(origin: string): string {
+  if (origin.startsWith("completion.")) {
+    return origin;
+  }
+  if (origin.startsWith("www.")) {
+    return `completion.${origin.slice(4)}`;
+  }
+  return `completion.${origin}`;
+}
+
+async function fetchKeywordSuggestions(seed: string, countryCode: string): Promise<string[]> {
   const normalized = seed.trim();
-  if (!normalized) return ["amazon publishing"];
-  const patterns = [
-    "%s",
-    "%s book",
-    "%s guide",
-    "%s planner",
-    "%s journal",
-    "best %s",
-    "%s workbook",
-    "%s for beginners",
-    "%s for kids",
-    "how to %s"
-  ];
-  const variants = new Set<string>();
-  patterns.forEach((pattern) => {
-    const phrase = pattern.replace("%s", normalized);
-    variants.add(phrase);
+  if (!normalized) {
+    return [];
+  }
+
+  const country = resolveCountry(countryCode);
+  const completionHost = deriveCompletionHost(country.host);
+  const endpoint = new URL("/api/2017/suggestions", `https://${completionHost}`);
+
+  endpoint.searchParams.set("limit", "20");
+  endpoint.searchParams.set("page-type", "Search");
+  endpoint.searchParams.set("search-alias", "aps");
+  endpoint.searchParams.set("alias", "aps");
+  endpoint.searchParams.set("client-id", "amazon-search-ui");
+  endpoint.searchParams.set("suggestion-type", "KEYWORD");
+  endpoint.searchParams.set("prefix", normalized);
+  endpoint.searchParams.set("q", normalized);
+  endpoint.searchParams.set("marketplace", country.marketplaceId);
+
+  const response = await fetch(endpoint, {
+    headers: {
+      "user-agent": USER_AGENT,
+      "accept-language": "en-US,en;q=0.9",
+      accept: "application/json,text/plain;q=0.9,*/*;q=0.8"
+    }
   });
-  return Array.from(variants);
+
+  if (!response.ok) {
+    throw new Error(`Amazon suggestions responded with ${response.status}`);
+  }
+
+  let payload: SuggestionResponse | undefined;
+  try {
+    payload = (await response.json()) as SuggestionResponse;
+  } catch (error) {
+    throw new Error(`Unable to parse Amazon suggestions (${error instanceof Error ? error.message : "unknown error"})`);
+  }
+
+  const variants = new Map<string, string>();
+  if (payload?.suggestions) {
+    payload.suggestions.forEach((entry) => {
+      const value = entry?.value?.trim();
+      if (!value) return;
+      const key = value.toLowerCase();
+      if (!variants.has(key)) {
+        variants.set(key, value);
+      }
+    });
+  }
+
+  return Array.from(variants.values()).slice(0, 20);
 }
 
 export async function scrapeAmazonKeywordData(seed: string, countryCode: string): Promise<ScrapeOutcome> {
@@ -238,7 +285,11 @@ export async function scrapeAmazonKeywordData(seed: string, countryCode: string)
     throw new Error("Seed keyword is required");
   }
 
-  const variants = generateVariants(normalizedSeed);
+  const suggestions = await fetchKeywordSuggestions(normalizedSeed, countryCode);
+  const variants = [normalizedSeed, ...suggestions.filter((value) => value.toLowerCase() !== normalizedSeed.toLowerCase())];
+  if (variants.length === 0) {
+    throw new Error("Amazon returned no keyword suggestions");
+  }
   const results: KeywordInsight[] = [];
   const scrapedCompetitors: CompetitorResult[] = [];
   const scrapeErrors: string[] = [];
