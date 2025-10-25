@@ -285,8 +285,11 @@ export async function scrapeAmazonKeywordData(seed: string, countryCode: string)
     throw new Error("Seed keyword is required");
   }
 
-  const suggestions = await fetchKeywordSuggestions(normalizedSeed, countryCode);
-  const variants = [normalizedSeed, ...suggestions.filter((value) => value.toLowerCase() !== normalizedSeed.toLowerCase())];
+  const keywordSuggestions = await fetchKeywordSuggestions(normalizedSeed, countryCode);
+  const variants = [
+    normalizedSeed,
+    ...keywordSuggestions.filter((value) => value.toLowerCase() !== normalizedSeed.toLowerCase())
+  ];
   if (variants.length === 0) {
     throw new Error("Amazon returned no keyword suggestions");
   }
