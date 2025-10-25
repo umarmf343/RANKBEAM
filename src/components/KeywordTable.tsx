@@ -122,64 +122,66 @@ export function KeywordTable() {
             </div>
           </div>
         )}
-        <div className="mt-8 overflow-hidden rounded-3xl border border-white/10 bg-black/40">
+        <div className="mt-8 rounded-3xl border border-white/10 bg-black/40">
           {dataSource === "error" ? (
             <div className="px-6 py-16 text-center text-sm text-rose-200">
               We could not load live data from Amazon. Update the seed keyword or try again later.
             </div>
           ) : filteredInsights.length > 0 ? (
-            <table className="min-w-full text-left text-sm">
-              <thead className="bg-white/5 text-xs uppercase tracking-wide text-white/60">
-                <tr>
-                  <th className="px-6 py-4">Keyword</th>
-                  <th className="px-6 py-4">Search volume</th>
-                  <th className="px-6 py-4">Competitors</th>
-                  <th className="px-6 py-4">Avg reviews</th>
-                  <th className="px-6 py-4">Avg price</th>
-                  <th className="px-6 py-4">Title density</th>
-                  <th className="px-6 py-4">Avg age</th>
-                  <th className="px-6 py-4">Opportunity score</th>
-                  <th className="px-6 py-4">Demand score</th>
-                  <th className="px-6 py-4">Competition score</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredInsights.map((row, index) => {
-                  const isLeader = topOpportunity?.keyword === row.keyword;
-                  return (
-                    <tr
-                      key={row.keyword}
-                      className={`border-t border-white/5 text-white/80 transition ${
-                        isLeader ? "bg-aurora-500/5" : index % 2 === 1 ? "bg-white/[0.04]" : ""
-                      }`}
-                    >
-                      <td className="px-6 py-4 font-medium text-white">
-                        <span className="mr-2 text-white/40">{String(index + 1).padStart(2, "0")}</span>
-                        {row.keyword}
-                        {isLeader && <span className="ml-2 rounded-full bg-aurora-500/20 px-2 py-0.5 text-xs text-aurora-100">Top pick</span>}
-                      </td>
-                      <td className="px-6 py-4">{row.searchVolume.toLocaleString()}</td>
-                      <td className="px-6 py-4">{row.competitors.toLocaleString()}</td>
-                      <td className="px-6 py-4">{row.avgReviews.toLocaleString()}</td>
-                      <td className="px-6 py-4">${row.avgPrice.toFixed(2)}</td>
-                      <td className="px-6 py-4">
-                        {row.titleDensity.toFixed(0)}
-                        <span className="ml-2 text-xs text-white/50">titles</span>
-                      </td>
-                      <td className="px-6 py-4">{row.avgAge} months</td>
-                      <td className="px-6 py-4">
-                        <span className="inline-flex items-center gap-2 rounded-full bg-white/5 px-3 py-1 text-xs font-semibold text-white">
-                          {row.opportunityScore}
-                          {isLeader && <span className="text-aurora-300">▲</span>}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4">{row.demandScore}</td>
-                      <td className="px-6 py-4">{Math.round(row.competitionScore * 10)}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+            <div className="overflow-x-auto">
+              <table className="min-w-[960px] text-left text-sm">
+                <thead className="bg-white/5 text-xs uppercase tracking-wide text-white/60">
+                  <tr className="whitespace-nowrap">
+                    <th className="px-6 py-4">Keyword</th>
+                    <th className="px-6 py-4">Search volume</th>
+                    <th className="px-6 py-4">Competitors</th>
+                    <th className="px-6 py-4">Avg reviews</th>
+                    <th className="px-6 py-4">Avg price</th>
+                    <th className="px-6 py-4">Title density</th>
+                    <th className="px-6 py-4">Avg age</th>
+                    <th className="px-6 py-4">Opportunity score</th>
+                    <th className="px-6 py-4">Demand score</th>
+                    <th className="px-6 py-4">Competition score</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredInsights.map((row, index) => {
+                    const isLeader = topOpportunity?.keyword === row.keyword;
+                    return (
+                      <tr
+                        key={row.keyword}
+                        className={`border-t border-white/5 text-white/80 transition ${
+                          isLeader ? "bg-aurora-500/5" : index % 2 === 1 ? "bg-white/[0.04]" : ""
+                        }`}
+                      >
+                        <td className="px-6 py-4 font-medium text-white">
+                          <span className="mr-2 text-white/40">{String(index + 1).padStart(2, "0")}</span>
+                          {row.keyword}
+                          {isLeader && <span className="ml-2 rounded-full bg-aurora-500/20 px-2 py-0.5 text-xs text-aurora-100">Top pick</span>}
+                        </td>
+                        <td className="px-6 py-4">{row.searchVolume.toLocaleString()}</td>
+                        <td className="px-6 py-4">{row.competitors.toLocaleString()}</td>
+                        <td className="px-6 py-4">{row.avgReviews.toLocaleString()}</td>
+                        <td className="px-6 py-4">${row.avgPrice.toFixed(2)}</td>
+                        <td className="px-6 py-4">
+                          {row.titleDensity.toFixed(0)}
+                          <span className="ml-2 text-xs text-white/50">titles</span>
+                        </td>
+                        <td className="px-6 py-4">{row.avgAge} months</td>
+                        <td className="px-6 py-4">
+                          <span className="inline-flex items-center gap-2 rounded-full bg-white/5 px-3 py-1 text-xs font-semibold text-white">
+                            {row.opportunityScore}
+                            {isLeader && <span className="text-aurora-300">▲</span>}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4">{row.demandScore}</td>
+                        <td className="px-6 py-4">{Math.round(row.competitionScore * 10)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           ) : (
             <div className="px-6 py-16 text-center text-sm text-white/60">
               No keyword insights yet. Try updating the seed keyword above to generate fresh opportunities.
