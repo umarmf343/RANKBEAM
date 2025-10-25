@@ -1,7 +1,6 @@
 import { load } from "cheerio";
 import { resolveCountry } from "../data/countries";
 import type { KeywordInsight, CompetitorResult } from "../lib/keywordEngine";
-import { generateCompetitors, stableFloat } from "../lib/keywordEngine";
 
 type ScrapeOutcome = {
   keywords: KeywordInsight[];
@@ -160,7 +159,7 @@ function deriveSuggestions(seed: string, rows: KeywordInsight[]): string[] {
 function buildCompetitors(products: ParsedProduct[], countryCode: string): CompetitorResult[] {
   const country = resolveCountry(countryCode);
   return products.slice(0, 8).map((product, index) => {
-    const asin = extractAsinFromUrl(product.url) ?? `SCR${(stableFloat(`${product.title}-${index}`) * 1_000_000).toFixed(0)}`;
+    const asin = extractAsinFromUrl(product.url) ?? "UNKNOWN";
     const price = formatPrice(product.price, country.currency);
     const rating = product.rating && Number.isFinite(product.rating) ? Math.min(5, product.rating) : 0;
     const reviewCount = Math.round(product.reviews ?? 0);
@@ -266,27 +265,14 @@ export async function scrapeAmazonKeywordData(seed: string, countryCode: string)
     throw new Error(`Unable to scrape Amazon results for \"${normalizedSeed}\": ${detail}`);
   }
 
-  const decoratedRows = results.map((row, index) => {
-    if (row.avgReviews === undefined) {
-      return {
-        ...row,
-        avgReviews: Math.round(40 + stableFloat(`${row.keyword}-reviews`) * 400),
-        avgPrice: Number.parseFloat((12 + stableFloat(`${row.keyword}-price`) * 18).toFixed(2)),
-        avgAge: Math.round(6 + stableFloat(`${row.keyword}-age`) * 30),
-        opportunityScore: Math.round(Math.min(100, row.demandScore * ((11 - row.competitionScore) / 10)))
-      } as KeywordInsight;
-    }
-    return row;
-  });
-
-  const suggestions = deriveSuggestions(normalizedSeed, decoratedRows);
+  const suggestions = deriveSuggestions(normalizedSeed, results);
 
   if (scrapedCompetitors.length === 0) {
-    scrapedCompetitors.push(...generateCompetitors(normalizedSeed, countryCode));
+    throw new Error("Amazon returned no competitor data");
   }
 
   return {
-    keywords: decoratedRows,
+    keywords: results,
     competitors: scrapedCompetitors,
     suggestedKeywords: suggestions,
     source: "scraped"
