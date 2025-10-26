@@ -1,12 +1,17 @@
 import { load } from "cheerio";
 import { resolveCountry } from "../data/countries";
-import type { KeywordInsight, CompetitorResult } from "../lib/keywordEngine";
+import {
+  type KeywordInsight,
+  type CompetitorResult,
+  generateKeywordInsights,
+  generateCompetitors
+} from "../lib/keywordEngine";
 
 type ScrapeOutcome = {
   keywords: KeywordInsight[];
   competitors: CompetitorResult[];
   suggestedKeywords: string[];
-  source: "scraped";
+  source: "scraped" | "synthetic";
 };
 
 type ParsedProduct = {
@@ -279,20 +284,14 @@ async function fetchKeywordSuggestions(seed: string, countryCode: string): Promi
   return Array.from(variants.values()).slice(0, 20);
 }
 
-export async function scrapeAmazonKeywordData(seed: string, countryCode: string): Promise<ScrapeOutcome> {
-  const normalizedSeed = seed.trim();
-  if (!normalizedSeed) {
-    throw new Error("Seed keyword is required");
-  }
+async function scrapeLiveAmazonKeywordData(seed: string, countryCode: string): Promise<ScrapeOutcome> {
+  const keywordSuggestions = await fetchKeywordSuggestions(seed, countryCode);
+  const variants = [seed, ...keywordSuggestions.filter((value) => value.toLowerCase() !== seed.toLowerCase())];
 
-  const keywordSuggestions = await fetchKeywordSuggestions(normalizedSeed, countryCode);
-  const variants = [
-    normalizedSeed,
-    ...keywordSuggestions.filter((value) => value.toLowerCase() !== normalizedSeed.toLowerCase())
-  ];
   if (variants.length === 0) {
     throw new Error("Amazon returned no keyword suggestions");
   }
+
   const results: KeywordInsight[] = [];
   const scrapedCompetitors: CompetitorResult[] = [];
   const scrapeErrors: string[] = [];
@@ -316,10 +315,10 @@ export async function scrapeAmazonKeywordData(seed: string, countryCode: string)
 
   if (results.length === 0) {
     const detail = scrapeErrors.length > 0 ? scrapeErrors.slice(0, 3).join("; ") : "Amazon returned no results";
-    throw new Error(`Unable to scrape Amazon results for \"${normalizedSeed}\": ${detail}`);
+    throw new Error(`Unable to scrape Amazon results for \"${seed}\": ${detail}`);
   }
 
-  const suggestions = deriveSuggestions(normalizedSeed, results);
+  const suggestions = deriveSuggestions(seed, results);
 
   if (scrapedCompetitors.length === 0) {
     throw new Error("Amazon returned no competitor data");
@@ -331,4 +330,34 @@ export async function scrapeAmazonKeywordData(seed: string, countryCode: string)
     suggestedKeywords: suggestions,
     source: "scraped"
   };
+}
+
+function buildSyntheticOutcome(seed: string, countryCode: string): ScrapeOutcome {
+  const keywords = generateKeywordInsights(seed, 20);
+  const competitors = generateCompetitors(seed, countryCode);
+  const suggestedKeywords = deriveSuggestions(seed, keywords);
+
+  return {
+    keywords,
+    competitors,
+    suggestedKeywords,
+    source: "synthetic"
+  };
+}
+
+export async function scrapeAmazonKeywordData(seed: string, countryCode: string): Promise<ScrapeOutcome> {
+  const normalizedSeed = seed.trim();
+  if (!normalizedSeed) {
+    throw new Error("Seed keyword is required");
+  }
+
+  try {
+    return await scrapeLiveAmazonKeywordData(normalizedSeed, countryCode);
+  } catch (error) {
+    console.warn(
+      `Falling back to synthetic keyword intelligence for '${normalizedSeed}' (${countryCode}).`,
+      error
+    );
+    return buildSyntheticOutcome(normalizedSeed, countryCode);
+  }
 }

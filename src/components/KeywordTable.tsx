@@ -1,5 +1,5 @@
 import { useRankBeamStore } from "@/lib/state";
-import { AlertTriangle, ArrowUpRight, Filter } from "lucide-react";
+import { AlertTriangle, ArrowUpRight, Filter, Info } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useMemo, useState } from "react";
 
@@ -31,6 +31,13 @@ export function KeywordTable() {
   }, [sortedInsights, minVolume, maxCompetition, maxTitleDensity, focusOpportunities]);
 
   const topOpportunity = filteredInsights[0];
+
+  const sourceLabel =
+    dataSource === "scraped"
+      ? "Live Amazon scrape"
+      : dataSource === "synthetic"
+      ? "RankBeam fallback dataset"
+      : "Unavailable";
 
   return (
     <section className="border-b border-white/5 bg-night" id="platform">
@@ -105,7 +112,7 @@ export function KeywordTable() {
         </div>
         <div className="mt-4 flex flex-col gap-2 text-xs text-white/50 sm:flex-row sm:items-center sm:justify-between">
           <span>
-            Source: <span className="font-semibold text-white/80">{dataSource === "scraped" ? "Live Amazon scrape" : "Unavailable"}</span>
+            Source: <span className="font-semibold text-white/80">{sourceLabel}</span>
           </span>
           {lastUpdated && (
             <span>
@@ -113,6 +120,17 @@ export function KeywordTable() {
             </span>
           )}
         </div>
+        {dataSource === "synthetic" && (
+          <div className="mt-4 flex items-center gap-3 rounded-2xl border border-aurora-500/30 bg-aurora-500/10 px-4 py-3 text-sm text-aurora-100">
+            <Info className="h-5 w-5 flex-shrink-0" aria-hidden />
+            <div>
+              <p className="font-semibold">Showing offline-ready intelligence.</p>
+              <p className="text-aurora-100/80">
+                Live Amazon data was unavailable, so RankBeam generated insights using its deterministic keyword engine.
+              </p>
+            </div>
+          </div>
+        )}
         {dataSource === "error" && (
           <div className="mt-4 flex items-center gap-3 rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
             <AlertTriangle className="h-5 w-5 flex-shrink-0" aria-hidden />

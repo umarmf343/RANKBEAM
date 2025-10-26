@@ -6,7 +6,7 @@ export type KeywordIntelligencePayload = {
   keywords: KeywordInsight[];
   competitors: CompetitorResult[];
   suggestedKeywords: string[];
-  source: "scraped";
+  source: "scraped" | "synthetic";
   scrapedAt: string;
 };
 

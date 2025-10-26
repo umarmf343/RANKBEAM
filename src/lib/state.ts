@@ -21,7 +21,7 @@ export type RankBeamState = {
   headlineIdeas: string[];
   loading: boolean;
   suggestedKeywords: string[];
-  dataSource: "scraped" | "error";
+  dataSource: "scraped" | "synthetic" | "error";
   lastUpdated?: string;
   error?: string;
   updateKeyword: (keyword: string) => void;
