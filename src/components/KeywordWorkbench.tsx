@@ -32,6 +32,22 @@ export function KeywordWorkbench() {
     setLocalKeyword(keyword);
   }, [keyword]);
 
+  const statusMessage = loading
+    ? "Refreshing keyword intelligence…"
+    : dataSource === "error"
+    ? error ?? "Unable to load live keyword intelligence"
+    : dataSource === "synthetic"
+    ? "Showing fallback keyword intelligence while Amazon is unreachable"
+    : "Insights updated in real-time";
+
+  const statusTone = loading
+    ? "animate-spin"
+    : dataSource === "error"
+    ? "text-rose-400"
+    : dataSource === "synthetic"
+    ? "text-aurora-300"
+    : "text-aurora-400";
+
   return (
     <section id="keywords" className="border-b border-white/5 bg-night">
       <div className="mx-auto flex max-w-6xl flex-col gap-10 px-6 py-16 lg:flex-row">
@@ -87,16 +103,8 @@ export function KeywordWorkbench() {
               </button>
             </div>
             <div className="mt-4 flex items-center gap-2 text-xs text-white/60" aria-live="polite">
-              <Sparkles
-                className={`h-4 w-4 ${
-                  loading ? "animate-spin" : dataSource === "error" ? "text-rose-400" : "text-aurora-400"
-                }`}
-              />
-              {loading
-                ? "Refreshing keyword intelligence…"
-                : dataSource === "error"
-                ? error ?? "Unable to load live keyword intelligence"
-                : "Insights updated in real-time"}
+              <Sparkles className={`h-4 w-4 ${statusTone}`} />
+              {statusMessage}
             </div>
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
